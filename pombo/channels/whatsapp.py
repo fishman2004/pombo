@@ -46,7 +46,8 @@ class _NeonizeClient:
         threading.Thread(target=self._client.connect, daemon=True, name="whatsapp").start()
 
     def is_connected(self) -> bool:
-        return bool(self._client.is_connected)
+        # conectar no servidor acontece antes do QR; só vale com a sessão logada
+        return bool(self._client.is_connected and self._client.is_logged_in)
 
     def list_groups(self) -> list[tuple[str, str]]:
         from neonize.utils.jid import Jid2String

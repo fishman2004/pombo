@@ -81,6 +81,19 @@ def test_library_error_becomes_send_error(tmp_path):
         ch.send(Target("whatsapp", "Comercial", ("123@g.us",)), "", "oi", docs(tmp_path, "a.xlsx"))
 
 
+def test_adapter_needs_login_not_just_socket():
+    # a neonize conecta no servidor antes do QR ser lido; isso não é "conectado" para o Pombo
+    from types import SimpleNamespace
+
+    from pombo.channels.whatsapp import _NeonizeClient
+
+    adapter = object.__new__(_NeonizeClient)
+    adapter._client = SimpleNamespace(is_connected=True, is_logged_in=False)
+    assert adapter.is_connected() is False
+    adapter._client.is_logged_in = True
+    assert adapter.is_connected() is True
+
+
 def test_list_groups_and_qr(tmp_path):
     client = FakeClient(connected=False)
     ch, _ = make(tmp_path, client)

@@ -3,3 +3,4 @@
 *.cmd text eol=crlf
 *.xlsx binary
 *.png binary
+*.csv -text
