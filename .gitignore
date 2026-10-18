@@ -18,3 +18,6 @@ __pycache__/
 whatsapp-sessao*/
 *.db
 .env
+
+# Configuração local do editor/assistente
+.claude/
