@@ -1,0 +1,9 @@
+[project]
+name = "pombo"
+version = "0.1.0"
+description = "Envio automático de relatórios por e-mail e WhatsApp, no horário certo e só quando o arquivo foi atualizado."
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

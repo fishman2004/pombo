@@ -1,0 +1,8 @@
+fastapi==0.145.0
+uvicorn==0.54.0
+Jinja2==3.1.6
+python-multipart==0.0.32
+keyring==25.7.0
+win11toast==0.36.3
+neonize==0.5.2
+openpyxl==3.1.5

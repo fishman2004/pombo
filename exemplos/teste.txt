@@ -1,0 +1,1 @@
+Arquivo de teste do Pombo. Se ele chegou, o envio funciona.

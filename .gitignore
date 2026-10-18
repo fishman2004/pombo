@@ -1,0 +1,20 @@
+# Ambiente e cache
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Rascunhos e registros de trabalho do assistente
+.superpowers/
+
+# Dados reais nunca entram no repositório (só os exemplos fictícios)
+*.csv
+*.xlsx
+*.xls
+!exemplos/*.csv
+!exemplos/*.xlsx
+
+# Sessão do WhatsApp e segredos
+whatsapp-sessao*/
+*.db
+.env
