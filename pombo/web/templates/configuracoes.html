@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Configurações · Pombo{% endblock %}
+{% block head %}{% if wa_status == 'aguardando_qr' %}<meta http-equiv="refresh" content="20">{% endif %}{% endblock %}
+{% block main %}
+<h1>Configurações</h1>
+{% if errors %}<div class="erros" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+{% if notes %}<div class="sucesso" role="status"><ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></div>{% endif %}
+
+<section id="whatsapp" class="cartao" style="margin-bottom:18px">
+  <h3>WhatsApp</h3>
+  {% if wa_status == 'conectado' %}
+    <p class="s-enviado">✔ Conectado.</p>
+  {% elif wa_status == 'aguardando_qr' %}
+    <p>No celular do número que vai enviar: <strong>WhatsApp › Aparelhos conectados › Conectar aparelho</strong> e leia o código abaixo.</p>
+    <div class="qr"><img src="/whatsapp/qr.png" alt="QR code para conectar o WhatsApp" width="264" height="264"></div>
+    <p class="ajuda">A página se atualiza sozinha. O código muda a cada poucos segundos.</p>
+  {% else %}
+    <p class="s-falhou">Desconectado. Feche e abra o Pombo para gerar um novo QR code.</p>
+  {% endif %}
+</section>
+
+<form class="ficha" method="post" action="/configuracoes">
+  <fieldset>
+    <legend>Você</legend>
+    <label for="analyst_name">Seu nome</label>
+    <input type="text" id="analyst_name" name="analyst_name" value="{{ settings.analyst_name }}">
+    <p class="ajuda">Aparece no histórico. É assim que o painel da equipe vai saber quem enviou.</p>
+    <label for="self_email" style="margin-top:12px">Seu e-mail (recebe avisos e testes)</label>
+    <input type="email" id="self_email" name="self_email" value="{{ settings.self_email }}">
+    <label for="self_whatsapp" style="margin-top:12px">Seu WhatsApp (recebe testes)</label>
+    <input type="text" id="self_whatsapp" name="self_whatsapp" value="{{ settings.self_whatsapp }}">
+  </fieldset>
+
+  <fieldset>
+    <legend>E-mail de envio</legend>
+    <p class="ajuda">Copie do Thunderbird: Configurações da conta › Servidor de saída (SMTP).</p>
+    <label for="smtp_host">Servidor</label>
+    <input type="text" id="smtp_host" name="smtp_host" value="{{ settings.smtp_host }}" placeholder="mail.suaempresa.com.br">
+    <div class="filtros" style="margin:12px 0 0">
+      <div><label for="smtp_port">Porta</label><input type="number" id="smtp_port" name="smtp_port" value="{{ settings.smtp_port }}"></div>
+      <div><label for="smtp_security">Segurança</label>
+        <select id="smtp_security" name="smtp_security">
+          <option value="ssl" {% if settings.smtp_security == 'ssl' %}selected{% endif %}>SSL/TLS (geralmente 465)</option>
+          <option value="starttls" {% if settings.smtp_security == 'starttls' %}selected{% endif %}>STARTTLS (geralmente 587)</option>
+        </select></div>
+    </div>
+    <label for="smtp_user" style="margin-top:12px">Usuário</label>
+    <input type="text" id="smtp_user" name="smtp_user" value="{{ settings.smtp_user }}">
+    <label for="smtp_password" style="margin-top:12px">Senha</label>
+    <input type="password" id="smtp_password" name="smtp_password" autocomplete="new-password" placeholder="deixe vazio para manter a atual">
+    <p class="ajuda">A senha fica no Gerenciador de Credenciais do Windows, nunca em arquivo.</p>
+    <label for="max_email_mb" style="margin-top:12px">Limite de anexos por e-mail (MB)</label>
+    <input type="number" id="max_email_mb" name="max_email_mb" value="{{ settings.max_email_mb }}">
+  </fieldset>
+
+  <fieldset>
+    <legend>Histórico</legend>
+    <label for="history_dir">Pasta do histórico</label>
+    <input type="text" id="history_dir" name="history_dir" value="{{ settings.history_dir or '' }}" placeholder="vazio = pasta local do Pombo">
+    <p class="ajuda">Aponte para uma pasta da rede compartilhada quando a equipe for usar o painel.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Funcionamento</legend>
+    <label style="font-weight:400"><input type="checkbox" name="start_with_windows" {% if settings.start_with_windows %}checked{% endif %}> Abrir o Pombo junto com o Windows</label>
+    <label style="font-weight:400"><input type="checkbox" name="demo_mode" {% if settings.demo_mode %}checked{% endif %}> Modo demonstração (não envia nada de verdade)</label>
+  </fieldset>
+
+  <div><button>Salvar</button></div>
+</form>
+
+<form method="post" action="/configuracoes/testar-email" style="margin-top:14px"><button class="discreto">Enviar e-mail de teste para mim</button></form>
+{% endblock %}

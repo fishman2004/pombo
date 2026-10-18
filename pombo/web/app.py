@@ -5,14 +5,19 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable
 
+import keyring
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from ..channels import Target
+from ..channels.email import EmailChannel
+from ..channels.whatsapp import normalize_phone
 from ..files import inspect
-from ..models import Dispatch, Schedule
+from ..models import Contact, Dispatch, EmailList, Schedule, Settings
 from ..store import Store, new_id
+from ..winsys import set_start_with_windows
 
 HERE = Path(__file__).parent
 WEEKDAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
@@ -165,6 +170,192 @@ def create_app(
         names = {"email": "e-mail", "whatsapp": "WhatsApp"}
         results = [f"{names.get(ch, ch)}: {res}" for ch, res in engine.send_test(dispatch_id)]
         return envio_form(request, dispatch_values(d), test_results=results or ["Configure seu e-mail ou WhatsApp em Configurações."])
+
+    # ---------- Contatos, listas e grupos ----------
+
+    def used_in(reg, kind: str, item_id: str) -> list[str]:
+        fields = {
+            "contact": ("email_contact_ids", "whatsapp_contact_ids"),
+            "list": ("email_list_ids",),
+            "group": ("whatsapp_group_ids",),
+        }[kind]
+        return [d.name for d in reg.dispatches if any(item_id in getattr(d, f) for f in fields)]
+
+    def contatos_page(request: Request, status_code: int = 200, **ctx) -> HTMLResponse:
+        return page(request, "contatos.html", status_code, active="contatos", reg=store.load(), **ctx)
+
+    @app.get("/contatos", response_class=HTMLResponse)
+    def contatos(request: Request):
+        return contatos_page(request)
+
+    @app.post("/contatos")
+    def contato_salvar(request: Request, id: str = Form(""), name: str = Form(""), email: str = Form(""),
+                       whatsapp: str = Form("")):
+        name, email, whatsapp = name.strip(), email.strip(), whatsapp.strip()
+        errors = []
+        if not name:
+            errors.append("Dê um nome ao contato.")
+        if not email and not whatsapp:
+            errors.append("Informe e-mail ou WhatsApp.")
+        if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            errors.append(f"E-mail inválido: {email}")
+        if errors:
+            return contatos_page(request, 422, errors=errors)
+        reg = store.load()
+        c = Contact(id=id or new_id(), name=name, email=email or None,
+                    whatsapp=normalize_phone(whatsapp) if whatsapp else None)
+        reg.contacts = [x for x in reg.contacts if x.id != c.id] + [c]
+        store.save(reg)
+        return RedirectResponse("/contatos", status_code=303)
+
+    @app.post("/contatos/{contact_id}/excluir")
+    def contato_excluir(request: Request, contact_id: str):
+        reg = store.load()
+        if users := used_in(reg, "contact", contact_id):
+            return contatos_page(request, 422, errors=[f"Usado em: {', '.join(users)}. Tire dos envios antes de excluir."])
+        reg.contacts = [x for x in reg.contacts if x.id != contact_id]
+        for lst in reg.email_lists:
+            lst.contact_ids = [c for c in lst.contact_ids if c != contact_id]
+        store.save(reg)
+        return RedirectResponse("/contatos", status_code=303)
+
+    @app.post("/listas")
+    async def lista_salvar(request: Request):
+        f = await request.form()
+        name = f.get("name", "").strip()
+        if not name:
+            return contatos_page(request, 422, errors=["Dê um nome à lista."])
+        reg = store.load()
+        lst = EmailList(id=f.get("id") or new_id(), name=name, contact_ids=f.getlist("contact_ids"))
+        reg.email_lists = [x for x in reg.email_lists if x.id != lst.id] + [lst]
+        store.save(reg)
+        return RedirectResponse("/contatos", status_code=303)
+
+    @app.post("/listas/{list_id}/excluir")
+    def lista_excluir(request: Request, list_id: str):
+        reg = store.load()
+        if users := used_in(reg, "list", list_id):
+            return contatos_page(request, 422, errors=[f"Usado em: {', '.join(users)}. Tire dos envios antes de excluir."])
+        reg.email_lists = [x for x in reg.email_lists if x.id != list_id]
+        store.save(reg)
+        return RedirectResponse("/contatos", status_code=303)
+
+    @app.post("/grupos/atualizar")
+    def grupos_atualizar(request: Request):
+        try:
+            fetched = whatsapp.list_groups()
+        except Exception as exc:
+            return contatos_page(request, 200, errors=[f"Não consegui buscar os grupos: {exc}"])
+        reg = store.load()
+        ids = {g.id for g in fetched}
+        # grupo que sumiu mas está em uso fica, para não quebrar um envio em silêncio
+        kept = [g for g in reg.whatsapp_groups if g.id not in ids and used_in(reg, "group", g.id)]
+        reg.whatsapp_groups = sorted(fetched + kept, key=lambda g: g.name.lower())
+        store.save(reg)
+        return RedirectResponse("/contatos", status_code=303)
+
+    @app.post("/grupos/{group_id}/excluir")
+    def grupo_excluir(request: Request, group_id: str):
+        reg = store.load()
+        if users := used_in(reg, "group", group_id):
+            return contatos_page(request, 422, errors=[f"Usado em: {', '.join(users)}. Tire dos envios antes de excluir."])
+        reg.whatsapp_groups = [x for x in reg.whatsapp_groups if x.id != group_id]
+        store.save(reg)
+        return RedirectResponse("/contatos", status_code=303)
+
+    # ---------- Histórico ----------
+
+    @app.get("/historico", response_class=HTMLResponse)
+    def historico(request: Request, de: str = "", ate: str = "", envio: str = "", canal: str = "", status: str = ""):
+        end = date.fromisoformat(ate) if ate else today()
+        start = date.fromisoformat(de) if de else end - timedelta(days=6)
+        rows = history.rows_between(start, end) if history is not None else []
+        rows = [r for r in rows if (not envio or r.dispatch_id == envio) and (not canal or r.channel == canal)
+                and (not status or r.status == status)]
+        rows.sort(key=lambda r: r.when, reverse=True)
+        return page(request, "historico.html", active="historico", rows=rows, start=start, end=end,
+                    f={"envio": envio, "canal": canal, "status": status}, reg=store.load())
+
+    # ---------- Configurações ----------
+
+    def config_page(request: Request, status_code: int = 200, **ctx) -> HTMLResponse:
+        wa_status = whatsapp.status() if whatsapp is not None else "desconectado"
+        return page(request, "configuracoes.html", status_code, active="configuracoes", wa_status=wa_status, **ctx)
+
+    @app.get("/configuracoes", response_class=HTMLResponse)
+    def configuracoes(request: Request):
+        return config_page(request)
+
+    @app.post("/configuracoes", response_class=HTMLResponse)
+    async def configuracoes_salvar(request: Request):
+        f = await request.form()
+        errors = []
+        history_dir = f.get("history_dir", "").strip().strip('"')
+        if history_dir:
+            p = Path(history_dir)
+            if not p.is_dir():
+                errors.append(f"Pasta do histórico não existe: {history_dir}")
+            else:
+                try:
+                    probe = p / ".pombo-teste"
+                    probe.write_text("ok")
+                    probe.unlink()
+                except OSError:
+                    errors.append(f"Sem permissão para gravar na pasta do histórico: {history_dir}")
+        try:
+            port = int(f.get("smtp_port") or 465)
+            max_mb = int(f.get("max_email_mb") or 20)
+        except ValueError:
+            errors.append("Porta e limite de anexos precisam ser números.")
+            port, max_mb = 465, 20
+        if errors:
+            return config_page(request, 422, errors=errors)
+
+        reg = store.load()
+        old_history = reg.settings.history_dir
+        reg.settings = Settings(
+            analyst_name=f.get("analyst_name", "").strip(),
+            smtp_host=f.get("smtp_host", "").strip(),
+            smtp_port=port,
+            smtp_security="starttls" if f.get("smtp_security") == "starttls" else "ssl",
+            smtp_user=f.get("smtp_user", "").strip(),
+            self_email=f.get("self_email", "").strip(),
+            self_whatsapp=normalize_phone(f.get("self_whatsapp", "")) if f.get("self_whatsapp", "").strip() else "",
+            history_dir=Path(history_dir) if history_dir else None,
+            max_email_mb=max_mb,
+            demo_mode="demo_mode" in f,
+            start_with_windows="start_with_windows" in f,
+        )
+        store.save(reg)
+        password = f.get("smtp_password", "")
+        if password and reg.settings.smtp_user:
+            keyring.set_password("pombo", reg.settings.smtp_user, password)
+        if project_dir is not None:
+            set_start_with_windows(reg.settings.start_with_windows, project_dir)
+        notes = ["Configurações salvas."]
+        if old_history != reg.settings.history_dir:
+            notes.append("A nova pasta do histórico vale depois de fechar e abrir o Pombo.")
+        return config_page(request, notes=notes)
+
+    @app.post("/configuracoes/testar-email", response_class=HTMLResponse)
+    def configuracoes_testar_email(request: Request):
+        s = store.load().settings
+        if not s.self_email:
+            return config_page(request, errors=["Preencha \"Seu e-mail\" para receber o teste."])
+        channel = EmailChannel(lambda: store.load().settings, lambda user: keyring.get_password("pombo", user))
+        try:
+            channel.send(Target("email", "Eu", (s.self_email,)), "Pombo: teste de e-mail",
+                         "Se você recebeu isto, o Pombo consegue enviar e-mails.", [], use_bcc=False)
+        except Exception as exc:
+            return config_page(request, errors=[f"O teste falhou: {exc}"])
+        return config_page(request, notes=[f"E-mail de teste enviado para {s.self_email}."])
+
+    @app.get("/whatsapp/qr.png")
+    def whatsapp_qr():
+        png = whatsapp.qr_png() if whatsapp is not None else None
+        if not png:
+            return Response(status_code=404)
+        return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     app.state.page = page
     app.state.templates = templates

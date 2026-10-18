@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Histórico · Pombo{% endblock %}
+{% block main %}
+<h1>Histórico</h1>
+<form class="filtros" method="get" action="/historico">
+  <div><label for="de">De</label><input type="date" id="de" name="de" value="{{ start.isoformat() }}"></div>
+  <div><label for="ate">Até</label><input type="date" id="ate" name="ate" value="{{ end.isoformat() }}"></div>
+  <div><label for="envio">Envio</label>
+    <select id="envio" name="envio"><option value="">Todos</option>
+      {% for d in reg.dispatches %}<option value="{{ d.id }}" {% if f.envio == d.id %}selected{% endif %}>{{ d.name }}</option>{% endfor %}
+    </select></div>
+  <div><label for="canal">Canal</label>
+    <select id="canal" name="canal"><option value="">Todos</option>
+      <option value="email" {% if f.canal == 'email' %}selected{% endif %}>E-mail</option>
+      <option value="whatsapp" {% if f.canal == 'whatsapp' %}selected{% endif %}>WhatsApp</option>
+    </select></div>
+  <div><label for="status">Situação</label>
+    <select id="status" name="status"><option value="">Todas</option>
+      {% for s in ['enviado', 'falhou', 'esperando', 'desistiu', 'perdido', 'demonstracao'] %}<option value="{{ s }}" {% if f.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+    </select></div>
+  <div><button>Filtrar</button></div>
+</form>
+
+{% if rows %}
+<div class="tabela-rolagem"><table>
+  <thead><tr><th>Quando</th><th>Envio</th><th>Canal</th><th>Para</th><th>Situação</th><th>Detalhe</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td class="num">{{ r.when.strftime('%d/%m %H:%M') }}</td>
+    <td>{{ r.dispatch_name }}</td>
+    <td>{{ {'email': 'E-mail', 'whatsapp': 'WhatsApp'}.get(r.channel, '—') }}</td>
+    <td>{{ r.target or '—' }}</td>
+    <td class="s-{{ r.status }}">{{ r.status }}</td>
+    <td>{{ r.detail }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<p class="ajuda">O histórico completo fica em CSV (abre no Excel e no Power BI), na pasta configurada em Configurações.</p>
+{% else %}
+<p class="vazio">Nada no período.</p>
+{% endif %}
+{% endblock %}

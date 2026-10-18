@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Contatos · Pombo{% endblock %}
+{% block main %}
+<h1>Contatos</h1>
+{% if errors %}<div class="erros" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+
+<h2>Pessoas</h2>
+{% if reg.contacts %}
+<div class="tabela-rolagem"><table>
+  <thead><tr><th>Nome</th><th>E-mail</th><th>WhatsApp</th><th></th></tr></thead>
+  <tbody>
+  {% for c in reg.contacts|sort(attribute='name') %}
+    <tr>
+      <td>{{ c.name }}</td><td>{{ c.email or '—' }}</td><td class="num">{{ c.whatsapp or '—' }}</td>
+      <td><form method="post" action="/contatos/{{ c.id }}/excluir"><button class="perigo">Excluir</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}<p class="vazio">Nenhum contato ainda.</p>{% endif %}
+
+<form class="ficha cartao" method="post" action="/contatos" style="margin-top:14px">
+  <strong>Adicionar pessoa</strong>
+  <input type="hidden" name="id" value="">
+  <div><label for="c-name">Nome</label><input type="text" id="c-name" name="name" placeholder="Gestor Comercial"></div>
+  <div><label for="c-email">E-mail</label><input type="email" id="c-email" name="email" placeholder="nome@empresa.com.br"></div>
+  <div><label for="c-whats">WhatsApp</label><input type="text" id="c-whats" name="whatsapp" placeholder="(83) 99999-0000">
+    <p class="ajuda">Precisa de pelo menos um dos dois.</p></div>
+  <div><button>Adicionar</button></div>
+</form>
+
+<h2>Listas de e-mail</h2>
+{% if reg.email_lists %}
+<div class="cartoes">
+  {% for l in reg.email_lists|sort(attribute='name') %}
+  <article class="cartao">
+    <h3>{{ l.name }}</h3>
+    <p>{% for cid in l.contact_ids %}{% for c in reg.contacts if c.id == cid %}{{ c.name }}{% endfor %}{% if not loop.last %}, {% endif %}{% else %}vazia{% endfor %}</p>
+    <form method="post" action="/listas/{{ l.id }}/excluir"><button class="perigo">Excluir lista</button></form>
+  </article>
+  {% endfor %}
+</div>
+{% endif %}
+{% set com_email = reg.contacts|selectattr('email')|list %}
+<form class="ficha cartao" method="post" action="/listas" style="margin-top:14px">
+  <strong>Nova lista</strong>
+  <input type="hidden" name="id" value="">
+  <div><label for="l-name">Nome da lista</label><input type="text" id="l-name" name="name" placeholder="Gestão"></div>
+  {% if com_email %}<div class="opcoes">{% for c in com_email|sort(attribute='name') %}<label><input type="checkbox" name="contact_ids" value="{{ c.id }}"> {{ c.name }}</label>{% endfor %}</div>
+  {% else %}<p class="ajuda">Adicione pessoas com e-mail primeiro.</p>{% endif %}
+  <div><button>Criar lista</button></div>
+</form>
+
+<h2>Grupos de WhatsApp</h2>
+<p class="ajuda">Os grupos vêm direto do WhatsApp conectado, para não errar o destino. Para enviar a um grupo, o número conectado precisa fazer parte dele.</p>
+{% if reg.whatsapp_groups %}
+<div class="tabela-rolagem"><table>
+  <tbody>{% for g in reg.whatsapp_groups %}<tr><td>{{ g.name }}</td>
+    <td><form method="post" action="/grupos/{{ g.id }}/excluir"><button class="perigo">Remover</button></form></td></tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
+<form method="post" action="/grupos/atualizar" style="margin-top:12px"><button class="discreto">Buscar grupos no WhatsApp</button></form>
+{% endblock %}
