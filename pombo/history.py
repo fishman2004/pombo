@@ -6,6 +6,7 @@ local de pendentes e são gravadas depois. Nenhuma linha se perde.
 """
 
 import csv
+import logging
 import threading
 import unicodedata
 from dataclasses import astuple, dataclass
@@ -14,9 +15,10 @@ from pathlib import Path
 
 COLUMNS = (
     "data_hora", "analista", "envio", "horario_agendado", "canal",
-    "destinatario", "arquivos", "status", "detalhe", "envio_id",
+    "destinatario", "arquivos", "status", "detalhe", "envio_id", "destinatario_id",
 )
 SUCCESS = {"enviado", "demonstracao"}
+log = logging.getLogger(__name__)
 
 
 class HistoryLocked(Exception):
@@ -35,6 +37,7 @@ class Row:
     status: str
     detail: str
     dispatch_id: str
+    target_key: str = ""  # vazio em linhas antigas e nas linhas da rodada inteira
 
 
 def analyst_slug(name: str) -> str:
@@ -56,16 +59,28 @@ def _to_csv(row: Row) -> list[str]:
 
 def _from_csv(values: list[str]) -> Row:
     when = datetime.strptime(values[0], "%Y-%m-%d %H:%M:%S")
-    return Row(when, *values[1:10])
+    if len(values) < 10:
+        raise ValueError("linha incompleta")
+    # arquivos de versões antigas não têm as colunas do fim
+    return Row(when, *(values[1:] + [""] * (len(COLUMNS) - len(values)))[: len(COLUMNS) - 1])
 
 
 def _read_csv(path: Path) -> list[Row]:
     if not path.exists():
         return []
-    with path.open(encoding="utf-8-sig", newline="") as f:
+    rows = []
+    with path.open(encoding="utf-8-sig", errors="replace", newline="") as f:
         reader = csv.reader(f)
         next(reader, None)  # cabeçalho
-        return [_from_csv(v) for v in reader if v]
+        for number, values in enumerate(reader, start=2):
+            if not values:
+                continue
+            try:
+                rows.append(_from_csv(values))
+            except (ValueError, TypeError):
+                # linha estragada (salva pelo Excel, ou cortada numa queda de energia): ignora e segue
+                log.warning("histórico %s: linha %s ignorada", path.name, number)
+    return rows
 
 
 def _append_csv(path: Path, rows: list[Row]) -> None:
@@ -104,6 +119,8 @@ class History:
 
     def load(self, today: date) -> None:
         try:
+            # numa unidade de rede fora do ar, exists() só diria "não existe" e o histórico pareceria vazio
+            self.root.mkdir(parents=True, exist_ok=True)
             rows = _read_csv(self._file_for(_previous_month(today))) + _read_csv(self._file_for(today))
         except OSError as exc:
             raise HistoryLocked(str(exc)) from exc

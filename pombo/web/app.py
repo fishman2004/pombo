@@ -5,8 +5,11 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Callable
 
+from urllib.parse import urlsplit
+
 import keyring
 from fastapi import FastAPI, Form, Request
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -20,6 +23,7 @@ from ..store import Store, new_id
 from ..winsys import set_start_with_windows
 
 HERE = Path(__file__).parent
+ALLOWED_HOSTS = ("127.0.0.1", "localhost")
 WEEKDAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
 
 
@@ -45,6 +49,18 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="Pombo", docs_url=None, redoc_url=None)
     app.state.history_locked = False
+
+    # outro site aberto no navegador não pode mandar formulários para o Pombo (CSRF),
+    # nem ler as telas trocando o DNS (DNS rebinding)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(ALLOWED_HOSTS))
+
+    @app.middleware("http")
+    async def same_origin_only(request: Request, call_next):
+        if request.method == "POST":
+            source = request.headers.get("origin") or request.headers.get("referer")
+            if source and urlsplit(source).hostname not in ALLOWED_HOSTS:
+                return Response("Origem não permitida.", status_code=403)
+        return await call_next(request)
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals["state_label"] = state_label

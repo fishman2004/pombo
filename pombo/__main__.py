@@ -39,18 +39,25 @@ def _setup_logging() -> None:
     logging.basicConfig(level=logging.INFO, handlers=[handler])
 
 
-def _engine_loop(engine: Engine, history, app) -> None:
-    from .history import HistoryLocked
+def server_config(app):
+    import uvicorn
 
+    # log_config=None: aberto pelo pythonw (iniciar.bat) não existe console,
+    # e a configuração de log padrão do uvicorn quebra sem ele
+    return uvicorn.Config(app, log_level="warning", log_config=None)
+
+
+def _engine_loop(engine: Engine, history, app) -> None:
     # o motor só começa depois de ler o histórico; sem ele, poderia reenviar o que já saiu
     while True:
         try:
             history.load(date.today())
             app.state.history_locked = False
+            engine.ready = True
             break
-        except HistoryLocked:
+        except Exception:
             app.state.history_locked = True
-            log.warning("histórico travado; tentando de novo em %ss", TICK_SECONDS)
+            log.exception("histórico indisponível; tentando de novo em %ss", TICK_SECONDS)
             time.sleep(TICK_SECONDS)
     while True:
         engine.tick()
@@ -89,12 +96,18 @@ def main() -> None:
     email = EmailChannel(lambda: store.load().settings, lambda user: keyring.get_password("pombo", user))
     alerts = UserAlerts(lambda: store.load().settings, email)
     engine = Engine(store, history, {"email": email, "whatsapp": whatsapp}, alerts)
+    engine.ready = False
     app = create_app(engine, store, whatsapp, history=history, project_dir=PROJECT_DIR)
+    server = uvicorn.Server(server_config(app))  # antes das threads: se falhar, nada começou a enviar
 
     threading.Thread(target=_engine_loop, args=(engine, history, app), daemon=True, name="motor").start()
     threading.Timer(1.5, webbrowser.open, args=(url,)).start()
     log.info("Pombo iniciado em %s", url)
-    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=[sock])
+    try:
+        server.run(sockets=[sock])
+    except Exception:
+        log.exception("o servidor das telas parou")
+        raise
 
 
 if __name__ == "__main__":

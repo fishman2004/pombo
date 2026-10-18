@@ -18,7 +18,7 @@ def setup(tmp_path):
         whatsapp_groups=[WhatsAppGroup(id="123@g.us", name="Comercial")],
     ))
     engine = FakeEngine()
-    c = TestClient(create_app(engine, store, FakeWhatsApp(), today=lambda: date(2026, 10, 19)))
+    c = TestClient(create_app(engine, store, FakeWhatsApp(), today=lambda: date(2026, 10, 19)), base_url="http://127.0.0.1:8765")
     return c, store, engine
 
 

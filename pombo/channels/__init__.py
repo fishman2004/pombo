@@ -12,6 +12,7 @@ class Target:
     channel: str  # "email" | "whatsapp"
     label: str  # nome que aparece no histórico ("Gestão", "Grupo Comercial")
     addresses: tuple[str, ...]  # e-mails, ou um único id de WhatsApp
+    key: str = ""  # identificador estável ("list:l1", "contact:c1", "group:...") que sobrevive a renomear
 
 
 class SendError(Exception):

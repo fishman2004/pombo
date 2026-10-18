@@ -16,7 +16,7 @@ def client(tmp_path, items=None, demo=False, wa_status="conectado"):
     store.save(Registry(settings=Settings(demo_mode=demo)))
     engine = FakeEngine(items or {})
     app = create_app(engine, store, FakeWhatsApp(wa_status), today=lambda: TODAY)
-    return TestClient(app), engine
+    return TestClient(app, base_url="http://127.0.0.1:8765"), engine
 
 
 def test_timeline_shows_items(tmp_path):
@@ -65,3 +65,14 @@ def test_tomorrow_block(tmp_path):
     c, _ = client(tmp_path, {date(2026, 10, 20): [item(18, 0, "agendado", day=datetime(2026, 10, 20))]})
     html = c.get("/").text
     assert "Amanhã" in html and "○ agendado" in html
+
+
+def test_cross_site_post_rejected(tmp_path):
+    c, engine = client(tmp_path)
+    r = c.post("/envios/d1/enviar-agora", headers={"Origin": "https://site-malicioso.com"})
+    assert r.status_code == 403 and engine.sent_now == []
+
+
+def test_foreign_host_rejected(tmp_path):
+    c, _ = client(tmp_path)
+    assert c.get("/", headers={"Host": "rebind.exemplo.com"}).status_code == 400

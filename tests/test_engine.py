@@ -232,3 +232,106 @@ def test_timeline_states(tmp_path):
     items = env.engine.timeline(MON)
     assert [i.state for i in items] == ["perdido", "enviado", "parcial", "desistiu", "esperando", "agendado"]
     assert items[1].detail == "12:02" and (items[2].sent, items[2].total) == (1, 2)
+
+
+# ---------- achados da revisão final ----------
+
+def edit(env, fn):
+    reg = env.store.load()
+    fn(reg)
+    env.store.save(reg)
+
+
+def test_renamed_list_is_not_resent(env):
+    env.touch(at(17, 50))
+    env.tick_at(at(18, 0))
+    edit(env, lambda reg: setattr(reg.email_lists[0], "name", "Diretoria"))
+    env.tick_at(at(18, 30))
+    assert len(env.email.calls) == 1
+
+
+def test_same_name_contacts_have_separate_state(env):
+    def two_anas(reg):
+        reg.contacts.append(Contact(id="c9", name="Ana", email="outra.ana@exemplo.com"))
+        reg.dispatches[0].email_list_ids = []
+        reg.dispatches[0].email_contact_ids = ["c1", "c9"]
+    edit(env, two_anas)
+    env.touch(at(17, 50))
+    env.tick_at(at(18, 0))
+    assert len(env.email.calls) == 2
+
+
+def test_late_added_recipient_not_sent_for_missed_run(env):
+    env.touch(at(17, 50))
+    env.tick_at(at(18, 0))
+    edit(env, lambda reg: reg.dispatches[0].email_contact_ids.append("c2"))
+    env.tick_at(at(20, 30))
+    assert len(env.email.calls) == 1
+
+
+def test_older_pending_run_does_not_duplicate_newer(tmp_path):
+    env = Env(tmp_path, times=(time(14, 0), time(18, 0)))
+    env.wa.unavailable = True
+    env.touch(at(13, 50))
+    env.tick_at(at(14, 0))
+    env.touch(at(17, 50))
+    env.tick_at(at(18, 0))
+    assert len(env.email.calls) == 2
+    env.wa.unavailable = False
+    env.tick_at(at(18, 30))
+    assert len(env.wa.calls) == 1
+
+
+def test_forced_run_retries_failures(env):
+    env.touch(at(17, 50, MON - timedelta(days=1)))
+    env.run_until(at(18, 0), at(19, 0))  # desistiu
+    env.wa.fail = True
+    env.clock.now = at(19, 20)
+    env.engine.send_now("d1", at(18, 0))
+    assert env.engine.timeline(MON)[0].state == "parcial"
+    env.wa.fail = False
+    env.tick_at(at(19, 25))
+    assert [r.status for r in env.history.rows_for_run("d1", RUN18) if r.channel == "whatsapp"] == ["falhou", "enviado"]
+
+
+def test_manual_run_retries_when_whatsapp_comes_back(env):
+    env.wa.unavailable = True
+    env.clock.now = at(10, 0)
+    env.engine.send_now("d1")
+    env.wa.unavailable = False
+    env.tick_at(at(10, 5))
+    assert len(env.wa.calls) == 1
+
+
+def test_manual_double_click_is_ignored(env):
+    env.clock.now = at(10, 0)
+    env.engine.send_now("d1")
+    env.clock.now = at(10, 1)
+    env.engine.send_now("d1")
+    assert len(env.email.calls) == 1
+
+
+def test_manual_send_covers_waiting_scheduled_run(env):
+    env.touch(at(17, 50, MON - timedelta(days=1)))
+    env.tick_at(at(18, 0))
+    env.touch(at(18, 10))
+    env.clock.now = at(18, 12)
+    env.engine.send_now("d1")
+    env.run_until(at(18, 13), at(19, 5))
+    assert len(env.email.calls) == 1 and env.alerts.calls == []
+    assert "desistiu" not in env.statuses()
+    assert [i.state for i in env.engine.timeline(MON) if not i.manual] == ["enviado"]
+
+
+def test_readiness_checked_even_without_freshness(tmp_path):
+    env = Env(tmp_path, check=False)
+    env.files[0].write_bytes(b"")
+    env.tick_at(at(18, 0))
+    assert env.email.calls == [] and env.statuses() == ["esperando"]
+
+
+def test_send_now_waits_until_history_loaded(env):
+    env.engine.ready = False
+    env.clock.now = at(10, 0)
+    env.engine.send_now("d1")
+    assert env.email.calls == []

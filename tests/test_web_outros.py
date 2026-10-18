@@ -29,7 +29,7 @@ def env(tmp_path, monkeypatch):
     history.load(TODAY)
     wa = FakeWhatsApp(groups=[WhatsAppGroup(id="999@g.us", name="Diretoria")])
     app = web.create_app(FakeEngine(), store, wa, today=lambda: TODAY, history=history, project_dir=Path(r"C:\Pombo"))
-    return TestClient(app), store, history, wa, tmp_path
+    return TestClient(app, base_url="http://127.0.0.1:8765"), store, history, wa, tmp_path
 
 
 def test_contact_phone_normalized(env):

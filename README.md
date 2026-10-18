@@ -64,13 +64,23 @@ Primeira vez num PC novo? Siga [docs/primeiro-uso.md](docs/primeiro-uso.md).
 
 ### Quer só ver funcionando?
 
+No **Prompt de Comando** (cmd):
+
 ```bat
 set POMBO_DADOS=%TEMP%\pombo-demo
 .venv\Scripts\python -m tools.seed_demo
 .venv\Scripts\python -m pombo
 ```
 
-Cria uma pasta separada com envios, contatos e histórico **fictícios**, em modo demonstração.
+No **PowerShell**:
+
+```powershell
+$env:POMBO_DADOS = "$env:TEMP\pombo-demo"
+.venv\Scripts\python -m tools.seed_demo
+.venv\Scripts\python -m pombo
+```
+
+Cria uma pasta separada com envios, contatos e histórico **fictícios**, em modo demonstração. O script se recusa a escrever por cima de um cadastro de verdade.
 
 ## Documentação
 

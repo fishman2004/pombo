@@ -7,7 +7,7 @@ Assim, reiniciar o PC no meio de uma rodada nunca causa reenvio.
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Callable, Literal, Protocol
 
@@ -21,6 +21,7 @@ from .store import Store
 log = logging.getLogger(__name__)
 
 State = Literal["agendado", "esperando", "enviado", "parcial", "falhou", "desistiu", "perdido"]
+MANUAL_DEBOUNCE = timedelta(minutes=2)  # clique duplo em "Enviar agora" não manda duas vezes
 
 
 class Alerts(Protocol):
@@ -48,25 +49,32 @@ def targets_for(dispatch: Dispatch, reg: Registry) -> list[Target]:
         if lid in lists:
             addrs = tuple(contacts[c].email for c in lists[lid].contact_ids if c in contacts and contacts[c].email)
             if addrs:
-                out.append(Target("email", lists[lid].name, addrs))
+                out.append(Target("email", lists[lid].name, addrs, f"list:{lid}"))
     for cid in dispatch.email_contact_ids:
         if cid in contacts and contacts[cid].email:
-            out.append(Target("email", contacts[cid].name, (contacts[cid].email,)))
+            out.append(Target("email", contacts[cid].name, (contacts[cid].email,), f"contact:{cid}"))
     for cid in dispatch.whatsapp_contact_ids:
         if cid in contacts and contacts[cid].whatsapp:
-            out.append(Target("whatsapp", contacts[cid].name, (contacts[cid].whatsapp,)))
+            out.append(Target("whatsapp", contacts[cid].name, (contacts[cid].whatsapp,), f"contact:{cid}"))
     for gid in dispatch.whatsapp_group_ids:
         if gid in groups:
-            out.append(Target("whatsapp", groups[gid].name, (gid,)))
+            out.append(Target("whatsapp", groups[gid].name, (gid,), f"group:{gid}"))
     return out
 
 
+def _matches(r: Row, t: Target) -> bool:
+    if r.channel != t.channel:
+        return False
+    # linhas antigas não têm o identificador estável; aí vale o nome
+    return r.target_key == t.key if r.target_key else r.target == t.label
+
+
 def _done(rows: list[Row], t: Target) -> bool:
-    return any(r.channel == t.channel and r.target == t.label and r.status in SUCCESS for r in rows)
+    return any(_matches(r, t) and r.status in SUCCESS for r in rows)
 
 
 def _failures(rows: list[Row], t: Target) -> list[datetime]:
-    return [r.when for r in rows if r.channel == t.channel and r.target == t.label and r.status == "falhou"]
+    return [r.when for r in rows if _matches(r, t) and r.status == "falhou"]
 
 
 def _run_level(rows: list[Row], status: str) -> Row | None:
@@ -87,6 +95,7 @@ class Engine:
         self.channels = channels
         self.alerts = alerts
         self.clock = clock
+        self.ready = True  # o __main__ deixa False até o histórico ser lido
         self._lock = threading.Lock()
         self._evaluated_slot: dict[tuple[str, str], datetime] = {}
         self._unavailable_at: dict[tuple[str, str, str], datetime] = {}
@@ -96,43 +105,71 @@ class Engine:
 
     def tick(self) -> None:
         with self._lock:
+            if not self.ready:
+                return
             try:
                 now = self.clock()
                 reg = self.store.load()
                 self.history.flush()
                 for d in reg.dispatches:
-                    if not d.active:
-                        continue
-                    for scheduled in rules.runs_for_day(d.schedule, now.date()):
-                        if scheduled <= now:
-                            self._safe_process(reg, d, scheduled, run_label(scheduled, False), now, force=False)
+                    if d.active:
+                        self._tick_dispatch(reg, d, now)
             except Exception:
                 log.exception("erro inesperado no motor; seguindo no próximo ciclo")
 
-    def _safe_process(self, reg, d, scheduled, run, now, force) -> None:
+    def _tick_dispatch(self, reg: Registry, d: Dispatch, now: datetime) -> None:
+        due = [s for s in rules.runs_for_day(d.schedule, now.date()) if s <= now]
+        # da rodada mais nova para a mais velha: quem já entrou numa rodada nova
+        # não recebe de novo por uma rodada velha que ficou pendente
+        newer: list[Row] = []
+        for scheduled in reversed(due):
+            run = run_label(scheduled, False)
+            self._safe(reg, d, scheduled, run, now, force=False, newer=newer)
+            newer = newer + [r for r in self.history.rows_for_run(d.id, run) if r.channel]
+        for run, when in self._manual_runs(d.id, now.date()):
+            self._safe(reg, d, when, run, now, force=False, retry_only=True)
+
+    def _manual_runs(self, dispatch_id: str, day: date) -> list[tuple[str, datetime]]:
+        runs = {r.run for r in self.history.rows_between(day, day) if r.dispatch_id == dispatch_id and r.run.startswith("manual ")}
+        return sorted((run, datetime.strptime(run.removeprefix("manual "), "%Y-%m-%d %H:%M:%S")) for run in runs)
+
+    def _covered_by_manual(self, dispatch_id: str, scheduled: datetime) -> datetime | None:
+        """Um "Enviar agora" depois do horário já cumpriu a rodada agendada."""
+        times = [r.when for r in self.history.rows_between(scheduled.date(), scheduled.date())
+                 if r.dispatch_id == dispatch_id and r.run.startswith("manual ") and r.channel and r.when >= scheduled]
+        return min(times, default=None)
+
+    def _safe(self, reg, d, scheduled, run, now, **kw) -> None:
         try:
-            self._process(reg, d, scheduled, run, now, force)
+            self._process(reg, d, scheduled, run, now, **kw)
         except Exception:
             log.exception("erro ao processar %s %s", d.name, run)
 
-    def _process(self, reg: Registry, d: Dispatch, scheduled: datetime, run: str, now: datetime, force: bool) -> None:
+    def _process(self, reg: Registry, d: Dispatch, scheduled: datetime, run: str, now: datetime,
+                 force: bool, newer: list[Row] = (), retry_only: bool = False) -> None:
         rows = self.history.rows_for_run(d.id, run)
         targets = targets_for(d, reg)
         if not targets or all(_done(rows, t) for t in targets):
             return
-        if not force:
+        started = any(r.channel for r in rows)
+        if not force and not retry_only and not started:
             if _run_level(rows, "desistiu") or _run_level(rows, "perdido"):
                 return
-            if not rows and rules.is_missed(scheduled, now):
-                self._record(reg, d, run, now, "", "", "perdido", "programa fechado no horário")
+            if self._covered_by_manual(d.id, scheduled):
                 return
-            # passou na checagem antes se já existe alguma linha de destinatário nesta rodada
-            already_checked = any(r.channel for r in rows)
-            if d.check_freshness and not already_checked and not self._files_ready(reg, d, scheduled, run, now, rows):
+            if not rows and rules.is_missed(scheduled, now):
+                self._record(reg, d, run, now, None, "perdido", "programa fechado no horário")
+                return
+            if not self._files_ready(reg, d, scheduled, run, now, rows):
                 return
         for t in targets:
-            if not _done(rows, t):
-                self._send_one(reg, d, run, now, t, rows, force)
+            if _done(rows, t) or any(_matches(r, t) for r in newer):
+                continue
+            touched = any(_matches(r, t) for r in rows)
+            # rodada manual só repete o que falhou; rodada antiga não ganha destinatário novo
+            if not force and not touched and (retry_only or rules.is_missed(scheduled, now)):
+                continue
+            self._send_one(reg, d, run, now, t, rows, force)
 
     def _files_ready(self, reg, d, scheduled, run, now, rows) -> bool:
         key = (d.id, run)
@@ -149,30 +186,31 @@ class Engine:
             if not st.ready:
                 problem = f"{Path(f).name}: {st.reason}"
                 break
-            if not rules.is_fresh(st.mtime, now, last):
+            if d.check_freshness and not rules.is_fresh(st.mtime, now, last):
                 problem = f"{Path(f).name}: não atualizado hoje"
                 break
         if not problem:
             return True
         if current == slots[-1]:
-            self._record(reg, d, run, now, "", "", "desistiu", problem)
+            self._record(reg, d, run, now, None, "desistiu", problem)
             self._alert_once(("desistiu", d.id, run), f"Pombo: {d.name} não foi enviado",
                              f"{problem}. Abra o Pombo e use \"Enviar mesmo assim\" se quiser.")
         elif not _run_level(rows, "esperando"):
-            self._record(reg, d, run, now, "", "", "esperando", f"{problem} (esperando até {slots[-1]:%H:%M})")
+            self._record(reg, d, run, now, None, "esperando", f"{problem} (esperando até {slots[-1]:%H:%M})")
         return False
 
     def _send_one(self, reg, d, run, now, t: Target, rows, force) -> None:
         failures = _failures(rows, t)
+        down_key = (d.id, run, f"{t.channel}:{t.key or t.label}")
         if not force:
             nxt = rules.next_retry_at(failures)
             if nxt is None or nxt > now:
                 return
-            last_down = self._unavailable_at.get((d.id, run, t.channel + t.label))
+            last_down = self._unavailable_at.get(down_key)
             if last_down and now - last_down < rules.RETRY_EVERY:
                 return
         if reg.settings.demo_mode:
-            self._record(reg, d, run, now, t.channel, t.label, "demonstracao", "modo demonstração: nada foi enviado")
+            self._record(reg, d, run, now, t, "demonstracao", "modo demonstração: nada foi enviado")
             return
         channel = self.channels.get(t.channel)
         try:
@@ -181,25 +219,25 @@ class Engine:
             channel.send(t, rules.render(d.subject, now, d.files), rules.render(d.message, now, d.files),
                          [Path(f) for f in d.files], use_bcc=d.use_bcc)
         except ChannelUnavailable as exc:
-            key = (d.id, run, t.channel + t.label)
-            if key not in self._unavailable_at:
-                self._record(reg, d, run, now, t.channel, t.label, "esperando", str(exc))
-            self._unavailable_at[key] = now
+            if down_key not in self._unavailable_at:
+                self._record(reg, d, run, now, t, "esperando", str(exc))
+            self._unavailable_at[down_key] = now
             self._alert_once(("indisponivel", t.channel, run), f"Pombo: {t.channel} indisponível",
                              f"{exc}. O envio de {d.name} sai assim que reconectar.")
             return
         except Exception as exc:
-            self._record(reg, d, run, now, t.channel, t.label, "falhou", str(exc) or type(exc).__name__)
+            self._record(reg, d, run, now, t, "falhou", str(exc) or type(exc).__name__)
             if len(failures) + 1 >= rules.MAX_ATTEMPTS:
-                self._alert_once(("falhou", d.id, run, t.label), f"Pombo: falha ao enviar {d.name}",
+                self._alert_once(("falhou", d.id, run, t.key or t.label), f"Pombo: falha ao enviar {d.name}",
                                  f"Não consegui enviar para {t.label} depois de {rules.MAX_ATTEMPTS} tentativas: {exc}")
             return
-        self._unavailable_at.pop((d.id, run, t.channel + t.label), None)
-        self._record(reg, d, run, now, t.channel, t.label, "enviado", "")
+        self._unavailable_at.pop(down_key, None)
+        self._record(reg, d, run, now, t, "enviado", "")
 
-    def _record(self, reg, d, run, now, channel, target, status, detail) -> None:
+    def _record(self, reg, d, run, now, target: Target | None, status, detail) -> None:
         files = "; ".join(Path(f).name for f in d.files)
-        self.history.append(Row(now, reg.settings.analyst_name, d.name, run, channel, target, files, status, detail, d.id))
+        channel, label, key = (target.channel, target.label, target.key) if target else ("", "", "")
+        self.history.append(Row(now, reg.settings.analyst_name, d.name, run, channel, label, files, status, detail, d.id, key))
 
     def _alert_once(self, key: tuple, title: str, body: str) -> None:
         if key in self._alerted:
@@ -215,11 +253,19 @@ class Engine:
     def send_now(self, dispatch_id: str, scheduled: datetime | None = None) -> None:
         """Envia já, ignorando a checagem de atualização. Nunca reenvia para quem já recebeu."""
         with self._lock:
+            if not self.ready:
+                return  # sem o histórico carregado, não dá para saber quem já recebeu
             reg = self.store.load()
             d = next(x for x in reg.dispatches if x.id == dispatch_id)
             now = self.clock()
-            run = run_label(scheduled, False) if scheduled else run_label(now, True)
-            self._process(reg, d, scheduled or now, run, now, force=True)
+            if scheduled is None:
+                recent = [w for _, w in self._manual_runs(d.id, now.date()) if now - w < MANUAL_DEBOUNCE]
+                if recent:
+                    return
+                run = run_label(now, True)
+            else:
+                run = run_label(scheduled, False)
+            self._safe(reg, d, scheduled or now, run, now, force=True)
 
     def send_test(self, dispatch_id: str) -> list[tuple[str, str]]:
         """Envia só para o próprio analista. Não grava histórico."""
@@ -251,36 +297,37 @@ class Engine:
                 continue
             for scheduled in rules.runs_for_day(d.schedule, day):
                 items.append(self._item(reg, d, scheduled, run_label(scheduled, False), now, manual=False))
-        manual_runs = {(r.dispatch_id, r.run) for r in self.history.rows_between(day, day) if r.run.startswith("manual ")}
-        by_id = {d.id: d for d in reg.dispatches}
-        for dispatch_id, run in manual_runs:
-            if dispatch_id in by_id:
-                when = datetime.strptime(run.removeprefix("manual "), "%Y-%m-%d %H:%M:%S")
-                items.append(self._item(reg, by_id[dispatch_id], when, run, now, manual=True))
+            for run, when in self._manual_runs(d.id, day):
+                items.append(self._item(reg, d, when, run, now, manual=True))
         return sorted(items, key=lambda i: (i.scheduled, i.dispatch_name))
 
     def _item(self, reg, d, scheduled, run, now, manual) -> TimelineItem:
         rows = self.history.rows_for_run(d.id, run)
         targets = targets_for(d, reg)
-        sent_rows = [r for r in rows if r.status in SUCCESS and r.channel]
-        sent = len({(r.channel, r.target) for r in sent_rows})
+        sent = sum(1 for t in targets if _done(rows, t))
         total = len(targets)
 
         def item(state: State, detail: str = "") -> TimelineItem:
             return TimelineItem(scheduled, d.id, d.name, state, detail, sent, total, manual)
 
+        channel_rows = [r for r in rows if r.channel]
         if total and sent >= total:
-            return item("enviado", max(r.when for r in sent_rows).strftime("%H:%M"))
+            return item("enviado", max(r.when for r in channel_rows if r.status in SUCCESS).strftime("%H:%M"))
+        if channel_rows:
+            # algo já foi enviado ou tentado: isso importa mais que "não atualizado"
+            last = channel_rows[-1]
+            if sent:
+                return item("parcial", last.detail)
+            if any(r.status == "falhou" for r in channel_rows):
+                return item("falhou", next(r for r in reversed(channel_rows) if r.status == "falhou").detail)
+            return item("esperando", last.detail)
+        if not manual and (when := self._covered_by_manual(d.id, scheduled)):
+            return item("enviado", f"pelo envio manual das {when:%H:%M}")
         if r := _run_level(rows, "perdido"):
             return item("perdido", r.detail)
         if r := _run_level(rows, "desistiu"):
             return item("desistiu", r.detail)
-        last_fail = next((r for r in reversed(rows) if r.status == "falhou"), None)
-        if sent:
-            return item("parcial", last_fail.detail if last_fail else "")
-        if last_fail:
-            return item("falhou", last_fail.detail)
-        if r := next((r for r in reversed(rows) if r.status == "esperando"), None):
+        if r := _run_level(rows, "esperando"):
             return item("esperando", r.detail)
         if not rows and scheduled <= now and rules.is_missed(scheduled, now):
             return item("perdido", "programa fechado no horário")

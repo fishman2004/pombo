@@ -33,3 +33,12 @@ def test_second_instance_exits_without_starting_engine(monkeypatch, tmp_path):
     finally:
         holder.close()
     assert opened == [f"http://127.0.0.1:{port}/"] and engines == []
+
+
+def test_server_config_works_without_console(monkeypatch):
+    # iniciar.bat usa pythonw: não há sys.stdout nem sys.stderr
+    from fastapi import FastAPI
+
+    monkeypatch.setattr("sys.stdout", None)
+    monkeypatch.setattr("sys.stderr", None)
+    entry.server_config(FastAPI())

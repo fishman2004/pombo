@@ -22,7 +22,13 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def seed(now: datetime | None = None) -> Path:
     now = now or datetime.now()
+    # nunca escreve na pasta real do Pombo: exige uma pasta própria para a demonstração
+    if not os.environ.get("POMBO_DADOS"):
+        raise SystemExit("Defina POMBO_DADOS com uma pasta só para a demonstração (veja o README).")
     base = data_dir()
+    existing = base / "cadastro.json"
+    if existing.exists() and not Store(existing).load().settings.demo_mode:
+        raise SystemExit(f"{existing} tem um cadastro de verdade. Use outra pasta em POMBO_DADOS.")
     examples = base / "relatorios"
     make_examples(examples, rows=300)
     vendas, plano = examples / "Vendas.xlsx", examples / "Plano_Excelencia.xlsx"

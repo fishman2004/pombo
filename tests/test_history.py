@@ -97,3 +97,37 @@ def test_rows_between(hist):
     hist.append(row(datetime(2026, 10, 17, 18, 0), run="2026-10-17 18:00"))
     hist.append(row(datetime(2026, 10, 19, 18, 0)))
     assert len(hist.rows_between(date(2026, 10, 18), date(2026, 10, 19))) == 1
+
+
+def test_load_raises_when_root_unreachable(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    def boom(self, *a, **k):
+        raise OSError("unidade de rede indisponível")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    with pytest.raises(HistoryLocked):
+        History(tmp_path / "S" / "historico", "Kayo", tmp_path / "p.csv").load(date(2026, 10, 19))
+
+
+def test_bad_rows_are_skipped(tmp_path):
+    f = tmp_path / "historico" / "kayo" / "2026-10.csv"
+    f.parent.mkdir(parents=True)
+    f.write_text(
+        ",".join(COLUMNS) + "\n"
+        "2026-10-19 18:00:00,Kayo,Vendas,2026-10-19 18:00,email,Gestão,V.xlsx,enviado,,a1\n"
+        "19/10/2026;lixo do Excel\n"
+        "2026-10-19 18:0\n",
+        encoding="utf-8-sig",
+    )
+    h = History(tmp_path / "historico", "Kayo", tmp_path / "p.csv")
+    h.load(date(2026, 10, 19))
+    assert len(h.rows_for_run("a1", "2026-10-19 18:00")) == 1
+
+
+def test_target_key_column_and_old_rows(hist, tmp_path):
+    assert COLUMNS[-1] == "destinatario_id"
+    hist.append(Row(datetime(2026, 10, 19, 18, 2), "Kayo", "V", "2026-10-19 18:00", "email", "Gestão", "", "enviado", "", "a1", "list:l1"))
+    h2 = History(tmp_path / "historico", "Kayo Ibiapino", tmp_path / "pendentes.csv")
+    h2.load(date(2026, 10, 19))
+    assert h2.rows_for_run("a1", "2026-10-19 18:00")[0].target_key == "list:l1"

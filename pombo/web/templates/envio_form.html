@@ -77,7 +77,7 @@
 {% if v.id %}
 <div class="acoes" style="margin-top:18px">
   <form method="post" action="/envios/{{ v.id }}/testar"><button class="discreto">Enviar teste só para mim</button></form>
-  <form method="post" action="/envios/{{ v.id }}/enviar-agora"><button class="discreto">Enviar agora para todos</button></form>
+  <form method="post" action="/envios/{{ v.id }}/enviar-agora" onsubmit="return confirm('Enviar agora para todos os destinatários?')"><button class="discreto">Enviar agora para todos</button></form>
   <form method="post" action="/envios/{{ v.id }}/excluir" onsubmit="return confirm('Excluir este envio?')"><button class="perigo">Excluir</button></form>
 </div>
 {% endif %}
