@@ -27,7 +27,14 @@ def state_label(i) -> str:
     }[i.state]
 
 
-def create_app(engine, store: Store, whatsapp, today: Callable[[], date] = date.today) -> FastAPI:
+def create_app(
+    engine,
+    store: Store,
+    whatsapp,
+    today: Callable[[], date] = date.today,
+    history=None,
+    project_dir: Path | None = None,
+) -> FastAPI:
     app = FastAPI(title="Pombo", docs_url=None, redoc_url=None)
     app.state.history_locked = False
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
