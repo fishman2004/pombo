@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Pombo{% endblock %}</title>
+  <link rel="icon" href="/static/pombo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/estilo.css">
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="topo">
+    <a class="marca" href="/"><img src="/static/pombo.svg" alt="" width="28" height="28"> Pombo</a>
+    <nav aria-label="Menu principal">
+      <a href="/" {% if active == 'hoje' %}aria-current="page"{% endif %}>Hoje</a>
+      <a href="/envios" {% if active == 'envios' %}aria-current="page"{% endif %}>Envios</a>
+      <a href="/contatos" {% if active == 'contatos' %}aria-current="page"{% endif %}>Contatos</a>
+      <a href="/historico" {% if active == 'historico' %}aria-current="page"{% endif %}>Histórico</a>
+      <a href="/configuracoes" {% if active == 'configuracoes' %}aria-current="page"{% endif %}>Configurações</a>
+    </nav>
+  </header>
+  {% for kind, text, link in banners %}
+  <div class="faixa faixa-{{ kind }}" role="status">{{ text }}{% if link %} <a href="{{ link[0] }}">{{ link[1] }}</a>{% endif %}</div>
+  {% endfor %}
+  <main>
+    {% block main %}{% endblock %}
+  </main>
+</body>
+</html>

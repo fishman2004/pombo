@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Hoje · Pombo{% endblock %}
+{% block head %}<meta http-equiv="refresh" content="30">{% endblock %}
+
+{% macro timeline(items, today) %}
+<ol class="linha">
+  {% for i in items %}
+  <li class="item estado-{{ i.state }}">
+    <time datetime="{{ i.scheduled.isoformat() }}">{{ i.scheduled.strftime('%H:%M') }}</time>
+    <div class="corpo">
+      <div class="titulo">
+        <strong>{{ i.dispatch_name }}</strong>
+        {% if i.manual %}<span class="etiqueta">manual</span>{% endif %}
+        <span class="estado">{{ state_label(i) }}</span>
+      </div>
+      {% if i.detail and i.state != 'enviado' %}<p class="detalhe">{{ i.detail }}</p>{% endif %}
+      {% if today and not i.manual %}
+      {% set label = {'esperando': 'Enviar mesmo assim', 'desistiu': 'Enviar mesmo assim', 'falhou': 'Tentar de novo', 'parcial': 'Tentar de novo', 'perdido': 'Enviar agora', 'agendado': 'Enviar agora'}.get(i.state) %}
+      {% if label %}
+      <form method="post" action="/envios/{{ i.dispatch_id }}/enviar-agora">
+        <input type="hidden" name="scheduled" value="{{ i.scheduled.isoformat() }}">
+        <button class="{{ 'botao' if i.state != 'agendado' else 'botao discreto' }}">{{ label }}</button>
+      </form>
+      {% endif %}
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ol>
+{% endmacro %}
+
+{% block main %}
+<section aria-labelledby="h-hoje">
+  <h1 id="h-hoje">Hoje <span class="data">{{ WEEKDAYS[day.weekday()] }}, {{ day.strftime('%d/%m') }}</span></h1>
+  {% if items %}
+    {{ timeline(items, True) }}
+  {% else %}
+    <p class="vazio">Nenhum envio programado para hoje. <a href="/envios/novo">Cadastrar um envio</a></p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="h-amanha" class="amanha">
+  <h2 id="h-amanha">Amanhã</h2>
+  {% if tomorrow %}{{ timeline(tomorrow, False) }}{% else %}<p class="vazio">Nada programado.</p>{% endif %}
+</section>
+{% endblock %}
