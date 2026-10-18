@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ v.name or 'Novo envio' }} · Pombo{% endblock %}
+{% block main %}
+<h1>{{ v.name if v.id else 'Novo envio' }}</h1>
+
+{% if errors %}<div class="erros" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
+{% if saved %}<div class="sucesso" role="status">Envio salvo.</div>{% endif %}
+{% if warnings %}<div class="avisos" role="status"><strong>Atenção:</strong> agora estes arquivos não estão prontos, mas o envio foi salvo:
+  <ul>{% for w in warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% endif %}
+{% if test_results %}<div class="avisos" role="status"><strong>Teste só para você:</strong>
+  <ul>{% for r in test_results %}<li>{{ r }}</li>{% endfor %}</ul></div>{% endif %}
+
+<form class="ficha" method="post" action="/envios">
+  <input type="hidden" name="id" value="{{ v.id }}">
+
+  <div>
+    <label for="name">Nome</label>
+    <input type="text" id="name" name="name" value="{{ v.name }}" placeholder="Vendas Diárias">
+  </div>
+
+  <div>
+    <label for="files">Arquivos</label>
+    <textarea id="files" name="files" placeholder="S:\Relatórios definitivos\Vendas.xlsx">{{ v.files }}</textarea>
+    <p class="ajuda">Um caminho por linha. Dica: no Explorador, segure Shift, clique com o botão direito no arquivo e escolha "Copiar como caminho".</p>
+    {% if file_statuses %}<ul class="ajuda">{% for s in file_statuses %}<li>{{ s.path.name }}: {{ 'pronto' if s.ready else s.reason }}{% if s.mtime %} · modificado {{ s.mtime.strftime('%d/%m %H:%M') }}{% endif %}</li>{% endfor %}</ul>{% endif %}
+  </div>
+
+  <fieldset>
+    <legend>Destinatários</legend>
+    {% if not (reg.email_lists or reg.contacts or reg.whatsapp_groups) %}
+      <p class="ajuda">Nenhum contato ainda. <a href="/contatos">Cadastre em Contatos</a>.</p>
+    {% endif %}
+    {% if reg.email_lists %}<p><strong>Listas de e-mail</strong></p><div class="opcoes">
+      {% for l in reg.email_lists %}<label><input type="checkbox" name="email_list_ids" value="{{ l.id }}" {% if l.id in v.email_list_ids %}checked{% endif %}> {{ l.name }}</label>{% endfor %}</div>{% endif %}
+    {% set com_email = reg.contacts|selectattr('email')|list %}
+    {% if com_email %}<p><strong>Contatos por e-mail</strong></p><div class="opcoes">
+      {% for c in com_email %}<label><input type="checkbox" name="email_contact_ids" value="{{ c.id }}" {% if c.id in v.email_contact_ids %}checked{% endif %}> {{ c.name }}</label>{% endfor %}</div>{% endif %}
+    {% set com_whats = reg.contacts|selectattr('whatsapp')|list %}
+    {% if com_whats %}<p><strong>Contatos por WhatsApp</strong></p><div class="opcoes">
+      {% for c in com_whats %}<label><input type="checkbox" name="whatsapp_contact_ids" value="{{ c.id }}" {% if c.id in v.whatsapp_contact_ids %}checked{% endif %}> {{ c.name }}</label>{% endfor %}</div>{% endif %}
+    {% if reg.whatsapp_groups %}<p><strong>Grupos de WhatsApp</strong></p><div class="opcoes">
+      {% for g in reg.whatsapp_groups %}<label><input type="checkbox" name="whatsapp_group_ids" value="{{ g.id }}" {% if g.id in v.whatsapp_group_ids %}checked{% endif %}> {{ g.name }}</label>{% endfor %}</div>{% endif %}
+    <label style="margin-top:12px; font-weight:400"><input type="checkbox" name="use_bcc" {% if v.use_bcc %}checked{% endif %}> E-mail com destinatários em cópia oculta (ninguém vê a lista)</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Quando</legend>
+    <div class="opcoes">
+      {% for w in range(7) %}<label><input type="checkbox" name="weekdays" value="{{ w }}" {% if w in v.weekdays %}checked{% endif %}> {{ WEEKDAYS[w] }}</label>{% endfor %}
+    </div>
+    <label for="times" style="margin-top:12px">Horários</label>
+    <input type="text" id="times" name="times" value="{{ v.times }}" placeholder="18:00, 14:00">
+    <p class="ajuda">Separe vários horários por vírgula.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Mensagem</legend>
+    <label for="subject">Assunto do e-mail</label>
+    <input type="text" id="subject" name="subject" value="{{ v.subject }}">
+    <label for="message" style="margin-top:12px">Texto (e-mail e legenda do WhatsApp)</label>
+    <textarea id="message" name="message">{{ v.message }}</textarea>
+    <p class="ajuda">Campos automáticos: <code>{saudacao}</code> (Bom dia/Boa tarde/Boa noite), <code>{data}</code>, <code>{hora}</code>, <code>{arquivos}</code>.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Segurança</legend>
+    <label style="font-weight:400"><input type="checkbox" name="check_freshness" {% if v.check_freshness %}checked{% endif %}> Só enviar se o arquivo foi atualizado (espera até 1 hora e me avisa se não for)</label>
+    <label style="font-weight:400"><input type="checkbox" name="active" {% if v.active %}checked{% endif %}> Envio ativo</label>
+  </fieldset>
+
+  <div class="acoes">
+    <button>Salvar</button>
+    <a class="botao discreto" href="/envios">Voltar</a>
+  </div>
+</form>
+
+{% if v.id %}
+<div class="acoes" style="margin-top:18px">
+  <form method="post" action="/envios/{{ v.id }}/testar"><button class="discreto">Enviar teste só para mim</button></form>
+  <form method="post" action="/envios/{{ v.id }}/enviar-agora"><button class="discreto">Enviar agora para todos</button></form>
+  <form method="post" action="/envios/{{ v.id }}/excluir" onsubmit="return confirm('Excluir este envio?')"><button class="perigo">Excluir</button></form>
+</div>
+{% endif %}
+{% endblock %}

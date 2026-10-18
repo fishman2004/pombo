@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Envios · Pombo{% endblock %}
+{% block main %}
+<div class="acoes" style="justify-content: space-between">
+  <h1>Envios</h1>
+  <a class="botao" href="/envios/novo">+ Novo envio</a>
+</div>
+{% if dispatches %}
+<div class="cartoes">
+  {% for d in dispatches|sort(attribute='name') %}
+  <article class="cartao {% if not d.active %}pausado{% endif %}">
+    <h3><a href="/envios/{{ d.id }}">{{ d.name }}</a>{% if not d.active %} <span class="etiqueta">pausado</span>{% endif %}</h3>
+    <p>{% for w in range(7) %}{% if w in d.schedule.weekdays %}{{ WEEKDAYS[w] }} {% endif %}{% endfor %}
+      · {% for t in d.schedule.times %}{{ t.strftime('%H:%M') }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+    <p>{% for f in d.files %}{{ f.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<p class="vazio">Nenhum envio cadastrado ainda. Comece cadastrando seus <a href="/contatos">contatos</a> e depois um <a href="/envios/novo">envio</a>.</p>
+{% endif %}
+{% endblock %}
