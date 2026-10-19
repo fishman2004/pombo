@@ -58,7 +58,22 @@ class _NeonizeClient:
         from neonize.utils.jid import build_jid
 
         user, server = to.split("@", 1)
-        self._client.send_document(build_jid(user, server), data, caption=caption, filename=filename, mimetype=mimetype)
+        jid = build_jid(user, server)
+        if server == "s.whatsapp.net":
+            jid = self._resolve(user)
+        self._client.send_document(jid, data, caption=caption, filename=filename, mimetype=mimetype)
+
+    def _resolve(self, number: str):
+        """Pergunta ao WhatsApp o endereço real. Resolve o nono dígito sozinho."""
+        candidates = [number]
+        # celular brasileiro com 9: tenta também sem o 9 (contas antigas)
+        if number.startswith("55") and len(number) == 13 and number[4] == "9":
+            candidates.append(number[:4] + number[5:])
+        for candidate in candidates:
+            for r in self._client.is_on_whatsapp("+" + candidate):
+                if r.IsIn:
+                    return r.JID
+        raise RuntimeError(f"o número {number} não está no WhatsApp")
 
 
 class WhatsAppChannel:
