@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import keyring
 from fastapi import FastAPI, Form, Request
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -365,6 +365,11 @@ def create_app(
         except Exception as exc:
             return config_page(request, errors=[f"O teste falhou: {exc}"])
         return config_page(request, notes=[f"E-mail de teste enviado para {s.self_email}."])
+
+    @app.get("/whatsapp/status")
+    def whatsapp_status():
+        status = whatsapp.status() if whatsapp is not None else "desconectado"
+        return JSONResponse({"status": status}, headers={"Cache-Control": "no-store"})
 
     @app.get("/whatsapp/qr.png")
     def whatsapp_qr():

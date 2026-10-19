@@ -1,6 +1,5 @@
 {% extends "base.html" %}
 {% block title %}Configurações · Pombo{% endblock %}
-{% block head %}{% if wa_status == 'aguardando_qr' %}<meta http-equiv="refresh" content="20">{% endif %}{% endblock %}
 {% block main %}
 <h1>Configurações</h1>
 {% if errors %}<div class="erros" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></div>{% endif %}
@@ -12,8 +11,31 @@
     <p class="s-enviado">✔ Conectado.</p>
   {% elif wa_status == 'aguardando_qr' %}
     <p>No celular do número que vai enviar: <strong>WhatsApp › Aparelhos conectados › Conectar aparelho</strong> e leia o código abaixo.</p>
-    <div class="qr"><img src="/whatsapp/qr.png" alt="QR code para conectar o WhatsApp" width="264" height="264"></div>
-    <p class="ajuda">A página se atualiza sozinha. O código muda a cada poucos segundos.</p>
+    <div class="qr"><img id="wa-qr" src="/whatsapp/qr.png" alt="QR code para conectar o WhatsApp" width="264" height="264"></div>
+    <p class="ajuda" id="wa-ajuda">O código se atualiza sozinho a cada poucos segundos. O resto da página não muda, pode preencher os campos abaixo à vontade.</p>
+    <script>
+      (function () {
+        var qr = document.getElementById("wa-qr");
+        var ajuda = document.getElementById("wa-ajuda");
+        var timer = setInterval(function () {
+          fetch("/whatsapp/status", {cache: "no-store"})
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              if (d.status === "aguardando_qr") {
+                qr.src = "/whatsapp/qr.png?t=" + Date.now();
+              } else {
+                clearInterval(timer);
+                qr.parentNode.style.display = "none";
+                ajuda.textContent = d.status === "conectado"
+                  ? "✔ Conectado. Salve os campos abaixo, se ainda não salvou."
+                  : "Desconectado. Feche e abra o Pombo para gerar um novo QR code.";
+                ajuda.className = d.status === "conectado" ? "s-enviado" : "s-falhou";
+              }
+            })
+            .catch(function () {});
+        }, 5000);
+      })();
+    </script>
   {% else %}
     <p class="s-falhou">Desconectado. Feche e abra o Pombo para gerar um novo QR code.</p>
   {% endif %}

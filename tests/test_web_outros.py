@@ -125,3 +125,19 @@ def test_qr_png(env):
     assert c.get("/whatsapp/qr.png").status_code == 404
     wa._status = "aguardando_qr"
     assert c.get("/whatsapp/qr.png").content.startswith(b"\x89PNG")
+
+
+def test_config_sem_refresh_da_pagina_inteira(env):
+    c, _, _, wa, _ = env
+    wa._status = "aguardando_qr"
+    html = c.get("/configuracoes").text
+    assert 'http-equiv="refresh"' not in html
+    assert "/whatsapp/status" in html
+
+
+def test_whatsapp_status(env):
+    c, _, _, wa, _ = env
+    wa._status = "aguardando_qr"
+    assert c.get("/whatsapp/status").json() == {"status": "aguardando_qr"}
+    wa._status = "conectado"
+    assert c.get("/whatsapp/status").json() == {"status": "conectado"}
