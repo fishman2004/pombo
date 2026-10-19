@@ -9,39 +9,56 @@
   <h3>WhatsApp</h3>
   {% if wa_status == 'conectado' %}
     <p class="s-enviado">✔ Conectado.</p>
-  {% elif wa_status == 'aguardando_qr' %}
-    <p>No celular do número que vai enviar: <strong>WhatsApp › Aparelhos conectados › Conectar aparelho</strong> e leia o código abaixo.</p>
-    <div class="qr"><img id="wa-qr" src="/whatsapp/qr.png" alt="QR code para conectar o WhatsApp" width="264" height="264"></div>
-    <p class="ajuda" id="wa-ajuda">O código se atualiza sozinho a cada poucos segundos. O resto da página não muda, pode preencher os campos abaixo à vontade.</p>
+  {% else %}
+    <p id="wa-instrucao"{% if wa_status != 'aguardando_qr' %} hidden{% endif %}>No celular do número que vai enviar: <strong>WhatsApp › Aparelhos conectados › Conectar aparelho</strong> e leia o código abaixo.</p>
+    <div class="qr" id="wa-qr-caixa"{% if wa_status != 'aguardando_qr' %} hidden{% endif %}><img id="wa-qr"{% if wa_status == 'aguardando_qr' %} src="/whatsapp/qr.png"{% endif %} alt="QR code para conectar o WhatsApp" width="264" height="264"></div>
+    <p class="ajuda" id="wa-ajuda">
+      {%- if wa_status == 'aguardando_qr' -%}O código se atualiza sozinho. O resto da página não muda, pode preencher os campos abaixo à vontade.
+      {%- elif wa_status == 'conectando' -%}Gerando o QR code, aguarde alguns segundos…
+      {%- else -%}Desconectado ou o QR code venceu.{%- endif -%}
+    </p>
+    <form method="post" action="/whatsapp/reconectar" id="wa-reconectar"{% if wa_status != 'desconectado' %} hidden{% endif %}>
+      <button>Gerar novo QR code</button>
+    </form>
     <script>
       (function () {
+        var instrucao = document.getElementById("wa-instrucao");
+        var caixa = document.getElementById("wa-qr-caixa");
         var qr = document.getElementById("wa-qr");
         var ajuda = document.getElementById("wa-ajuda");
+        var botao = document.getElementById("wa-reconectar");
         var timer = setInterval(function () {
           fetch("/whatsapp/status", {cache: "no-store"})
             .then(function (r) { return r.json(); })
             .then(function (d) {
-              if (d.status === "aguardando_qr") {
+              var esperando = d.status === "aguardando_qr";
+              instrucao.hidden = !esperando;
+              caixa.hidden = !esperando;
+              botao.hidden = d.status !== "desconectado";
+              if (esperando) {
                 qr.src = "/whatsapp/qr.png?t=" + Date.now();
-              } else {
+                ajuda.className = "ajuda";
+                ajuda.textContent = "O código se atualiza sozinho. O resto da página não muda, pode preencher os campos abaixo à vontade.";
+              } else if (d.status === "conectando") {
+                ajuda.className = "ajuda";
+                ajuda.textContent = "Gerando o QR code, aguarde alguns segundos…";
+              } else if (d.status === "conectado") {
                 clearInterval(timer);
-                qr.parentNode.style.display = "none";
-                ajuda.textContent = d.status === "conectado"
-                  ? "✔ Conectado. Salve os campos abaixo, se ainda não salvou."
-                  : "Desconectado. Feche e abra o Pombo para gerar um novo QR code.";
-                ajuda.className = d.status === "conectado" ? "s-enviado" : "s-falhou";
+                ajuda.className = "s-enviado";
+                ajuda.textContent = "✔ Conectado. Salve os campos abaixo, se ainda não salvou.";
+              } else {
+                ajuda.className = "s-falhou";
+                ajuda.textContent = "Desconectado ou o QR code venceu.";
               }
             })
             .catch(function () {});
-        }, 5000);
+        }, 3000);
       })();
     </script>
-  {% else %}
-    <p class="s-falhou">Desconectado. Feche e abra o Pombo para gerar um novo QR code.</p>
   {% endif %}
 </section>
 
-<form class="ficha" method="post" action="/configuracoes">
+<form class="ficha" method="post" action="/configuracoes" enctype="multipart/form-data">
   <fieldset>
     <legend>Você</legend>
     <label for="analyst_name">Seu nome</label>
@@ -71,6 +88,13 @@
     <label for="smtp_password" style="margin-top:12px">Senha</label>
     <input type="password" id="smtp_password" name="smtp_password" autocomplete="new-password" placeholder="deixe vazio para manter a atual">
     <p class="ajuda">A senha fica no Gerenciador de Credenciais do Windows, nunca em arquivo.</p>
+    <label for="signature" style="margin-top:12px">Assinatura (imagem no fim dos e-mails)</label>
+    {% if settings.signature_path %}
+      <div style="margin:6px 0"><img src="/assinatura" alt="Sua assinatura atual" style="max-width:100%;max-height:160px;border:1px solid #ddd;border-radius:6px"></div>
+      <label style="font-weight:400"><input type="checkbox" name="remove_signature"> Remover a assinatura</label>
+    {% endif %}
+    <input type="file" id="signature" name="signature" accept=".png,.jpg,.jpeg,.gif,image/png,image/jpeg,image/gif">
+    <p class="ajuda">PNG, JPG ou GIF de até 1 MB. Vai no fim de todo e-mail, depois do texto. No WhatsApp não vai assinatura.{% if settings.signature_path %} Escolha outro arquivo para trocar.{% endif %}</p>
     <label for="max_email_mb" style="margin-top:12px">Limite de anexos por e-mail (MB)</label>
     <input type="number" id="max_email_mb" name="max_email_mb" value="{{ settings.max_email_mb }}">
   </fieldset>

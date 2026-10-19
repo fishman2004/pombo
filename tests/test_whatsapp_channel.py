@@ -11,6 +11,10 @@ class FakeClient:
         self.connected = connected
         self.fail = fail
         self.sent = []
+        self.stopped = False
+
+    def stop(self):
+        self.stopped = True
 
     def start(self, on_qr, on_connected, on_disconnected):
         self.on_qr = on_qr
@@ -55,7 +59,7 @@ def test_normalize_phone(raw, expected):
 
 def test_disconnected_raises_unavailable(tmp_path):
     ch, _ = make(tmp_path, FakeClient(connected=False))
-    assert ch.status() == "desconectado"
+    assert ch.status() == "conectando"  # acabou de abrir, esperando o QR
     with pytest.raises(ChannelUnavailable):
         ch.send(Target("whatsapp", "Comercial", ("123@g.us",)), "", "oi", docs(tmp_path, "a.xlsx"))
 
@@ -107,3 +111,81 @@ def test_list_groups_and_qr(tmp_path):
     assert ch.status() == "conectado" and ch.qr_png() is None
     [g] = ch.list_groups()
     assert (g.id, g.name) == ("123@g.us", "Comercial")
+
+
+class Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_qr_vence_e_vira_desconectado(tmp_path):
+    clock = Clock()
+    client = FakeClient(connected=False)
+    ch = WhatsAppChannel(tmp_path / "sessao", client_factory=lambda path: client, sleep=lambda s: None, clock=clock)
+    ch.start()
+    assert ch.status() == "conectando"
+    client.on_qr(b"2@abc,def")
+    assert ch.status() == "aguardando_qr"
+    clock.t += 61
+    assert ch.status() == "desconectado"
+    assert ch.qr_png() is None
+
+
+def test_sem_qr_por_muito_tempo_vira_desconectado(tmp_path):
+    clock = Clock()
+    ch = WhatsAppChannel(tmp_path / "sessao", client_factory=lambda path: FakeClient(connected=False),
+                         sleep=lambda s: None, clock=clock)
+    ch.start()
+    clock.t += 31
+    assert ch.status() == "desconectado"
+
+
+def test_reconectar_comeca_sessao_nova(tmp_path):
+    clock = Clock()
+    clients, paths = [], []
+
+    def factory(path):
+        paths.append(path)
+        clients.append(FakeClient(connected=False))
+        return clients[-1]
+
+    ch = WhatsAppChannel(tmp_path / "sessao", client_factory=factory, sleep=lambda s: None, clock=clock)
+    ch.start()
+    assert paths[0].name == "sessao.db"
+    clock.t += 31
+    ch.restart()
+    assert clients[0].stopped
+    assert len(clients) == 2 and paths[1] != paths[0]
+    assert ch.status() == "conectando"
+    clients[0].on_qr(b"velho")  # evento atrasado do cliente antigo é ignorado
+    assert ch.status() == "conectando"
+    clients[1].on_qr(b"novo")
+    assert ch.status() == "aguardando_qr"
+
+
+def test_reconectar_nao_mexe_quando_conectado(tmp_path):
+    clients = []
+
+    def factory(path):
+        clients.append(FakeClient(connected=True))
+        return clients[-1]
+
+    ch = WhatsAppChannel(tmp_path / "sessao", client_factory=factory, sleep=lambda s: None)
+    ch.start()
+    ch.restart()
+    assert len(clients) == 1 and not clients[0].stopped
+
+
+def test_abertura_apaga_sessoes_antigas(tmp_path):
+    sessao = tmp_path / "sessao"
+    sessao.mkdir()
+    (sessao / "atual.txt").write_text("sessao-2.db", encoding="utf-8")
+    (sessao / "sessao-2.db").write_bytes(b"x")
+    (sessao / "sessao.db").write_bytes(b"x")
+    (sessao / "sessao-1.db-wal").write_bytes(b"x")
+    ch = WhatsAppChannel(sessao, client_factory=lambda path: FakeClient(), sleep=lambda s: None)
+    ch.start()
+    assert sorted(f.name for f in sessao.iterdir()) == ["atual.txt", "sessao-2.db"]

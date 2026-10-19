@@ -26,6 +26,7 @@ class FakeWhatsApp:
     def __init__(self, status="conectado", groups=None):
         self._status = status
         self.groups = groups or []
+        self.restarts = 0
 
     def status(self):
         return self._status
@@ -35,6 +36,10 @@ class FakeWhatsApp:
 
     def list_groups(self):
         return self.groups
+
+    def restart(self):
+        self.restarts += 1
+        self._status = "conectando"
 
 
 def item(h, m, state, detail="", sent=0, total=2, name="Vendas Diárias", dispatch_id="d1", day=None, manual=False):

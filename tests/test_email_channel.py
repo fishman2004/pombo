@@ -119,3 +119,43 @@ def test_missing_password_is_send_error(tmp_path):
     ch = EmailChannel(lambda: s, lambda user: None)
     with pytest.raises(SendError, match="senha do e-mail não configurada"):
         ch.send(TARGET, "s", "m", files(tmp_path, "a.xlsx"))
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 20
+
+
+def test_signature_goes_inline_after_text(tmp_path):
+    sig = tmp_path / "assinatura.png"
+    sig.write_bytes(PNG)
+    channel(signature_path=sig).send(TARGET, "s", "Boa tarde!\nSegue o relatório.", files(tmp_path, "Vendas.xlsx"))
+    [(msg, _)] = FakeSMTP.instances[0].sent
+    html_part = msg.get_body(preferencelist=("html",))
+    plain_part = msg.get_body(preferencelist=("plain",))
+    assert "Boa tarde!<br>" in html_part.get_content()
+    assert plain_part.get_content().strip() == "Boa tarde!\nSegue o relatório."
+    images = [p for p in msg.walk() if p.get_content_type() == "image/png"]
+    assert len(images) == 1 and images[0].get_content() == PNG
+    cid = images[0]["Content-ID"].strip("<>")
+    assert f"cid:{cid}" in html_part.get_content()
+    # a imagem é parte do corpo, não um anexo; a planilha continua anexo
+    assert [a.get_filename() for a in msg.iter_attachments()] == ["Vendas.xlsx"]
+
+
+def test_without_signature_is_plain_text(tmp_path):
+    channel().send(TARGET, "s", "m", files(tmp_path, "Vendas.xlsx"))
+    [(msg, _)] = FakeSMTP.instances[0].sent
+    assert msg.get_body(preferencelist=("html",)) is None
+
+
+def test_missing_signature_file_does_not_block_sending(tmp_path):
+    channel(signature_path=tmp_path / "sumiu.png").send(TARGET, "s", "m", files(tmp_path, "Vendas.xlsx"))
+    [(msg, _)] = FakeSMTP.instances[0].sent
+    assert msg.get_body(preferencelist=("html",)) is None
+
+
+def test_text_with_html_characters_is_escaped(tmp_path):
+    sig = tmp_path / "assinatura.png"
+    sig.write_bytes(PNG)
+    channel(signature_path=sig).send(TARGET, "s", "Meta <100%> & cia", [])
+    [(msg, _)] = FakeSMTP.instances[0].sent
+    assert "Meta &lt;100%&gt; &amp; cia" in msg.get_body(preferencelist=("html",)).get_content()

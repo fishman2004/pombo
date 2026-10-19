@@ -1,9 +1,11 @@
 """Canal de e-mail via SMTP (biblioteca padrão do Python)."""
 
+import html
 import mimetypes
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import make_msgid
 from pathlib import Path
 from typing import Callable
 
@@ -36,6 +38,17 @@ class EmailChannel:
         msg["To"] = s.smtp_user if use_bcc else ", ".join(target.addresses)
         msg["Subject"] = subject
         msg.set_content(message)
+        signature = _signature(s.signature_path)
+        if signature is not None:
+            data, subtype = signature
+            cid = make_msgid(domain="pombo.local")
+            body = html.escape(message).replace("\n", "<br>\n")
+            msg.add_alternative(
+                f'<div style="font-family:Calibri,Arial,sans-serif;font-size:11pt">{body}</div>'
+                f'<p style="margin:16px 0 4px">--</p><img src="cid:{cid[1:-1]}" alt="Assinatura">',
+                subtype="html",
+            )
+            msg.get_payload()[1].add_related(data, maintype="image", subtype=subtype, cid=cid)
         for f in files:
             path = Path(f)
             ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
@@ -54,3 +67,18 @@ class EmailChannel:
                 server.send_message(msg, from_addr=s.smtp_user, to_addrs=list(target.addresses))
         except (OSError, smtplib.SMTPException) as exc:
             raise SendError(f"{type(exc).__name__}: {exc}") from exc
+
+
+SIGNATURE_TYPES = {".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".gif": "gif"}
+
+
+def _signature(path: Path | None) -> tuple[bytes, str] | None:
+    """A imagem da assinatura, se houver. Arquivo sumido não impede o envio."""
+    if path is None:
+        return None
+    subtype = SIGNATURE_TYPES.get(Path(path).suffix.lower())
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return None
+    return (data, subtype) if subtype and data else None

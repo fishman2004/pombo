@@ -56,6 +56,7 @@ class Settings(BaseModel):
     self_whatsapp: str = ""
     history_dir: Path | None = None
     max_email_mb: int = 20
+    signature_path: Path | None = None  # imagem no fim dos e-mails (fica na pasta de dados do Pombo)
     demo_mode: bool = False
     start_with_windows: bool = True
 

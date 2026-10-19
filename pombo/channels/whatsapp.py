@@ -16,6 +16,8 @@ from ..models import WhatsAppGroup
 from . import ChannelUnavailable, SendError, Target
 
 PAUSE_SECONDS = 3  # pausa entre mensagens, para não parecer disparo em massa
+QR_VALID_SECONDS = 60  # o WhatsApp para de gerar códigos novos depois de ~2 min; um código parado vence
+STARTING_SECONDS = 30  # tempo para o primeiro QR code aparecer depois de (re)conectar
 
 
 def normalize_phone(raw: str) -> str:
@@ -44,6 +46,9 @@ class _NeonizeClient:
         self._client.event(DisconnectedEv)(lambda _c, _e: on_disconnected())
         self._client.event(LoggedOutEv)(lambda _c, _e: on_disconnected())
         threading.Thread(target=self._client.connect, daemon=True, name="whatsapp").start()
+
+    def stop(self) -> None:
+        self._client.disconnect()
 
     def is_connected(self) -> bool:
         # conectar no servidor acontece antes do QR; só vale com a sessão logada
@@ -84,32 +89,98 @@ class WhatsAppChannel:
         session_dir: Path,
         client_factory: Callable[[Path], object] | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.session_dir = Path(session_dir)
         self._factory = client_factory or _NeonizeClient
         self._sleep = sleep
+        self._clock = clock
         self._client = None
+        self._generation = 0  # ignora eventos atrasados de um cliente antigo
         self._qr: bytes | None = None
+        self._qr_at = 0.0
+        self._started_at = 0.0
         self._lock = threading.Lock()  # um envio de cada vez
+
+    # --- sessão ---------------------------------------------------------
+
+    def _pointer(self) -> Path:
+        return self.session_dir / "atual.txt"
+
+    def _db_path(self) -> Path:
+        try:
+            name = self._pointer().read_text(encoding="utf-8").strip()
+        except OSError:
+            name = ""
+        return self.session_dir / (name or "sessao.db")
+
+    def _new_db(self) -> None:
+        """Aponta para um arquivo de sessão novo (o antigo pode estar preso pelo cliente anterior)."""
+        name = f"sessao-{int(time.time())}.db"
+        self._pointer().write_text(name, encoding="utf-8")
+
+    def _cleanup_old_sessions(self) -> None:
+        current = self._db_path().name
+        for f in self.session_dir.glob("sessao*.db*"):
+            if not f.name.startswith(current):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass  # ainda em uso; sai na próxima abertura do Pombo
 
     def start(self) -> None:
         self.session_dir.mkdir(parents=True, exist_ok=True)
-        self._client = self._factory(self.session_dir / "sessao.db")
-        self._client.start(self._on_qr, self._on_connected, lambda: None)
-
-    def _on_qr(self, data: bytes) -> None:
-        self._qr = data
-
-    def _on_connected(self) -> None:
+        self._cleanup_old_sessions()
+        self._generation += 1
+        gen = self._generation
         self._qr = None
+        self._started_at = self._clock()
+        self._client = self._factory(self._db_path())
+        self._client.start(
+            lambda data: self._on_qr(gen, data),
+            lambda: self._on_connected(gen),
+            lambda: self._on_disconnected(gen),
+        )
 
-    def status(self) -> Literal["conectado", "desconectado", "aguardando_qr"]:
+    def restart(self) -> None:
+        """Botão "Reconectar": derruba o cliente atual e começa de novo, com QR code novo."""
+        if self.status() == "conectado":
+            return
+        old = self._client
+        if old is not None:
+            try:
+                old.stop()
+            except Exception:
+                pass
+        # sem login válido, a sessão antiga só atrapalha: começa com uma em branco
+        self._new_db()
+        self.start()
+
+    def _on_qr(self, gen: int, data: bytes) -> None:
+        if gen == self._generation:
+            self._qr = data
+            self._qr_at = self._clock()
+
+    def _on_connected(self, gen: int) -> None:
+        if gen == self._generation:
+            self._qr = None
+
+    def _on_disconnected(self, gen: int) -> None:
+        if gen == self._generation:
+            self._qr = None
+
+    def status(self) -> Literal["conectado", "desconectado", "aguardando_qr", "conectando"]:
         if self._client is not None and self._client.is_connected():
             return "conectado"
-        return "aguardando_qr" if self._qr else "desconectado"
+        now = self._clock()
+        if self._qr and now - self._qr_at < QR_VALID_SECONDS:
+            return "aguardando_qr"
+        if not self._qr and self._client is not None and now - self._started_at < STARTING_SECONDS:
+            return "conectando"
+        return "desconectado"
 
     def qr_png(self) -> bytes | None:
-        if not self._qr or self.status() == "conectado":
+        if self.status() != "aguardando_qr":
             return None
         import segno
 

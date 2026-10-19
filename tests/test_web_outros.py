@@ -141,3 +141,62 @@ def test_whatsapp_status(env):
     assert c.get("/whatsapp/status").json() == {"status": "aguardando_qr"}
     wa._status = "conectado"
     assert c.get("/whatsapp/status").json() == {"status": "conectado"}
+
+
+def test_reconectar_whatsapp(env):
+    c, _, _, wa, _ = env
+    wa._status = "desconectado"
+    html = c.get("/configuracoes").text
+    assert 'action="/whatsapp/reconectar"' in html and "Gerar novo QR code" in html
+    r = c.post("/whatsapp/reconectar", headers={"origin": "http://127.0.0.1:8765"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/configuracoes#whatsapp"
+    assert wa.restarts == 1
+
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"x" * 20
+ORIGIN = {"origin": "http://127.0.0.1:8765"}
+
+
+def _salvar(c, files=None, **extra):
+    data = {"analyst_name": "Kayo", "smtp_port": "465", "max_email_mb": "20", **extra}
+    return c.post("/configuracoes", data=data, files=files or {}, headers=ORIGIN)
+
+
+def test_assinatura_envia_mostra_e_remove(env):
+    c, store, _, _, tmp_path = env
+    r = _salvar(c, files={"signature": ("minha assinatura.png", PNG, "image/png")})
+    assert r.status_code == 200
+    path = store.load().settings.signature_path
+    assert path == tmp_path / "assinatura.png" and path.read_bytes() == PNG
+    assert 'src="/assinatura"' in c.get("/configuracoes").text
+    assert c.get("/assinatura").content == PNG
+
+    # salvar de novo sem escolher arquivo mantém a assinatura
+    _salvar(c)
+    assert store.load().settings.signature_path == path
+
+    _salvar(c, remove_signature="on")
+    assert store.load().settings.signature_path is None and not path.exists()
+    assert c.get("/assinatura").status_code == 404
+
+
+def test_assinatura_troca_de_formato_apaga_a_antiga(env):
+    c, store, _, _, tmp_path = env
+    _salvar(c, files={"signature": ("a.png", PNG, "image/png")})
+    _salvar(c, files={"signature": ("a.jpg", b"\xff\xd8\xff" + b"x" * 20, "image/jpeg")})
+    assert store.load().settings.signature_path == tmp_path / "assinatura.jpg"
+    assert not (tmp_path / "assinatura.png").exists()
+
+
+def test_assinatura_recusa_arquivo_que_nao_e_imagem(env):
+    c, store, _, _, _ = env
+    r = _salvar(c, files={"signature": ("assinatura.png", b"nao sou imagem", "image/png")})
+    assert r.status_code == 422 and "PNG, JPG ou GIF" in r.text
+    assert store.load().settings.signature_path is None
+
+
+def test_assinatura_recusa_arquivo_grande(env):
+    c, store, _, _, _ = env
+    big = PNG + b"x" * (1024 * 1024)
+    r = _salvar(c, files={"signature": ("assinatura.png", big, "image/png")})
+    assert r.status_code == 422 and "1 MB" in r.text

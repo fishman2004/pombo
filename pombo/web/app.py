@@ -1,5 +1,7 @@
 """As telas do Pombo: um site local, aberto só neste PC (127.0.0.1)."""
 
+import logging
+import mimetypes
 import re
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
@@ -21,6 +23,15 @@ from ..files import inspect
 from ..models import Contact, Dispatch, EmailList, Schedule, Settings
 from ..store import Store, new_id
 from ..winsys import set_start_with_windows
+
+log = logging.getLogger(__name__)
+
+SIGNATURE_EXTS = {".png", ".jpg", ".jpeg", ".gif"}
+SIGNATURE_MAX_BYTES = 1024 * 1024
+
+
+def _looks_like_image(data: bytes) -> bool:
+    return data.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a"))
 
 HERE = Path(__file__).parent
 ALLOWED_HOSTS = ("127.0.0.1", "localhost")
@@ -324,10 +335,31 @@ def create_app(
         except ValueError:
             errors.append("Porta e limite de anexos precisam ser números.")
             port, max_mb = 465, 20
+        upload = f.get("signature")
+        new_signature = None
+        if upload is not None and getattr(upload, "filename", ""):
+            data = await upload.read()
+            ext = Path(upload.filename).suffix.lower()
+            if ext not in SIGNATURE_EXTS or not _looks_like_image(data):
+                errors.append("A assinatura precisa ser uma imagem PNG, JPG ou GIF.")
+            elif len(data) > SIGNATURE_MAX_BYTES:
+                errors.append("A imagem da assinatura passa de 1 MB. Diminua o tamanho dela e tente de novo.")
+            else:
+                new_signature = (data, ext)
         if errors:
             return config_page(request, 422, errors=errors)
 
         reg = store.load()
+        signature_path = reg.settings.signature_path
+        if "remove_signature" in f and signature_path is not None:
+            Path(signature_path).unlink(missing_ok=True)
+            signature_path = None
+        if new_signature is not None:
+            data, ext = new_signature
+            for old in store.path.parent.glob("assinatura.*"):
+                old.unlink(missing_ok=True)
+            signature_path = store.path.parent / f"assinatura{ext}"
+            signature_path.write_bytes(data)
         old_history = reg.settings.history_dir
         reg.settings = Settings(
             analyst_name=f.get("analyst_name", "").strip(),
@@ -339,6 +371,7 @@ def create_app(
             self_whatsapp=normalize_phone(f.get("self_whatsapp", "")) if f.get("self_whatsapp", "").strip() else "",
             history_dir=Path(history_dir) if history_dir else None,
             max_email_mb=max_mb,
+            signature_path=signature_path,
             demo_mode="demo_mode" in f,
             start_with_windows="start_with_windows" in f,
         )
@@ -370,6 +403,23 @@ def create_app(
     def whatsapp_status():
         status = whatsapp.status() if whatsapp is not None else "desconectado"
         return JSONResponse({"status": status}, headers={"Cache-Control": "no-store"})
+
+    @app.get("/assinatura")
+    def assinatura():
+        path = store.load().settings.signature_path
+        if path is None or not Path(path).is_file():
+            return Response(status_code=404)
+        ctype = mimetypes.guess_type(Path(path).name)[0] or "application/octet-stream"
+        return Response(Path(path).read_bytes(), media_type=ctype, headers={"Cache-Control": "no-store"})
+
+    @app.post("/whatsapp/reconectar")
+    def whatsapp_reconnect():
+        if whatsapp is not None:
+            try:
+                whatsapp.restart()
+            except Exception:
+                log.exception("não foi possível reconectar o WhatsApp")
+        return RedirectResponse("/configuracoes#whatsapp", status_code=303)
 
     @app.get("/whatsapp/qr.png")
     def whatsapp_qr():
