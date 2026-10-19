@@ -2,7 +2,7 @@
 
 ## 1. Python "só para mim"
 
-1. Acesse [python.org/downloads](https://www.python.org/downloads/) e baixe o **Python 3.12 ou mais novo** para Windows.
+1. Acesse [python.org/downloads](https://www.python.org/downloads/) e baixe o **Python 3.12 ou 3.13** para Windows. Versões mais novas podem ainda não ter todas as bibliotecas prontas.
 2. Na primeira tela do instalador:
    - **desmarque** "Use admin privileges when installing py.exe";
    - **marque** "Add python.exe to PATH";

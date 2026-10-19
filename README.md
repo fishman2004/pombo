@@ -54,7 +54,7 @@ Detalhes em [docs/arquitetura.md](docs/arquitetura.md).
 
 ## Instalação (Windows, sem administrador)
 
-1. Instale o **Python 3.12+** marcando **"Install for me only"** (não precisa de admin). [Passo a passo](docs/instalacao.md).
+1. Instale o **Python 3.12 ou 3.13** marcando **"Install for me only"** (não precisa de admin). Versões mais novas podem ainda não ter todas as bibliotecas prontas. [Passo a passo](docs/instalacao.md).
 2. Baixe este projeto: botão verde **Code › Download ZIP** e extraia.
 3. Dois cliques em **`instalar.bat`**.
 4. Dois cliques em **`iniciar.bat`**. O Pombo abre no navegador.
@@ -101,7 +101,7 @@ Cria uma pasta separada com envios, contatos e histórico **fictícios**, em mod
 .venv\Scripts\python -m pytest
 ```
 
-Python 3.12+ · FastAPI · Jinja2 · neonize (WhatsApp) · smtplib · keyring · pytest.
+Python 3.12 ou 3.13 · FastAPI · Jinja2 · neonize (WhatsApp) · smtplib · keyring · pytest.
 Mais de 100 testes automáticos cobrem as regras que mais podem errar: horários, arquivo atualizado, novas tentativas, envio perdido e "nunca reenviar".
 O desenho completo está em [docs/superpowers/specs](docs/superpowers/specs) e o plano de construção em [docs/superpowers/plans](docs/superpowers/plans).
 
