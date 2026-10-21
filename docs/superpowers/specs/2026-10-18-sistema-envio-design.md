@@ -2,7 +2,7 @@
 
 **Data:** 18/10/2026 · **Autor:** Kayo Ibiapino (analista de dados, Polybalas) · **Status:** aguardando aprovação
 
-> Legenda: o que o Kayo decidiu está escrito como decisão. O que foi escolha do Claude (assistente) está marcado com **[escolha do Claude]** e pode ser contestado.
+> Legenda: o que o Kayo decidiu está escrito como decisão. O que foi escolha técnica está marcado com **[escolha técnica]** e pode ser contestado.
 
 ---
 
@@ -60,7 +60,7 @@ O projeto tem dois objetivos de mesmo peso:
 | Sem acesso ao banco de dados (só Winthor/TARGIT → arquivos) | O sistema trabalha só com **pastas e arquivos**. |
 | O analista está aprendendo a programar | Código simples, legível, comentado onde importa; construção em etapas pequenas. |
 | Rede corporativa pode bloquear SMTP ou WhatsApp Web | **Primeira etapa da construção é testar isso no PC da empresa** (seção 10). |
-| PC precisa estar ligado e o programa aberto no horário | O PC do analista **fica sempre ligado** (só reinicia às vezes). Por isso: o programa **inicia com o Windows** (ligado por padrão), **impede o PC de entrar em suspensão** enquanto roda (API do Windows, sem admin) **[escolha do Claude]** e recupera envios perdidos após reinício (seção 5.5). A limitação continua documentada para quem desliga o PC. |
+| PC precisa estar ligado e o programa aberto no horário | O PC do analista **fica sempre ligado** (só reinicia às vezes). Por isso: o programa **inicia com o Windows** (ligado por padrão), **impede o PC de entrar em suspensão** enquanto roda (API do Windows, sem admin) **[escolha técnica]** e recupera envios perdidos após reinício (seção 5.5). A limitação continua documentada para quem desliga o PC. |
 
 ## 4. Como funciona (visão geral)
 
@@ -80,7 +80,7 @@ O projeto tem dois objetivos de mesmo peso:
                             └──────────────────────────────────────────────────────────────────────┘     da equipe / hub "API"
 ```
 
-### 4.1 Escolhas de tecnologia **[escolha do Claude]**
+### 4.1 Escolhas de tecnologia **[escolha técnica]**
 - **Python 3.12+.** Já instalado. É a linguagem padrão em dados e a melhor para controlar o Excel na fase 2.
 - **Tela web local**, aberta no navegador e servida só em `127.0.0.1`. Nada fica exposto na rede. Isso também prepara o hub da TV, que será uma página web.
 - **E-mail:** biblioteca padrão do Python (`smtplib` / `email`), sem dependência extra.
@@ -88,7 +88,7 @@ O projeto tem dois objetivos de mesmo peso:
 - **Agendador:** dentro do próprio programa (ex.: APScheduler), sem o Agendador de Tarefas do Windows.
 - Framework web, biblioteca de agendamento exata e estilo visual: **ficam com o construtor**, respeitando "simples de aprender" e "sem etapa de build de JavaScript".
 
-### 4.2 Peça trocável de canal **[escolha do Claude]**
+### 4.2 Peça trocável de canal **[escolha técnica]**
 E-mail e WhatsApp são **canais**. Cada canal é uma peça com a mesma forma: recebe a mensagem, os arquivos e um destinatário e devolve "enviado" ou "falhou + motivo". O resto do sistema não sabe como cada canal funciona por dentro.
 
 Isso não é generalização por capricho: é o argumento central da documentação. **Migrar para a API oficial do WhatsApp é trocar uma peça, não refazer o sistema.** O mesmo vale para trocar de servidor de e-mail.
@@ -110,7 +110,7 @@ Cada envio tem:
 ### 5.2 Como cada canal entrega
 - **E-mail:** um único e-mail para a lista, com todos os arquivos anexados. Destinatários em **Para** ou **Cco** (definido por envio). Remetente: a conta do analista no servidor `mail.polybalas.com.br`.
 - **WhatsApp:** para cada contato/grupo, envia os arquivos como documento, com a mensagem como legenda do primeiro arquivo. Remetente: o **número corporativo** do analista (decisão do Kayo), conectado como "aparelho conectado". O número pessoal nunca é usado, então um eventual bloqueio não atinge o WhatsApp pessoal. Esse número precisa fazer parte dos grupos de destino.
-- Antes de enviar, confere se o arquivo existe, não está vazio, não está aberto/travado pelo Excel e cabe no limite do servidor de e-mail. **[escolha do Claude: 20 MB por e-mail, configurável]**
+- Antes de enviar, confere se o arquivo existe, não está vazio, não está aberto/travado pelo Excel e cabe no limite do servidor de e-mail. **[escolha técnica: 20 MB por e-mail, configurável]**
 
 ### 5.3 Regra do arquivo atualizado (decidida pelo Kayo)
 No horário do envio:
@@ -118,15 +118,15 @@ No horário do envio:
 2. Se não, **não envia**. Confere de novo **a cada 15 minutos, por até 1 hora**.
 3. Se depois de 1 hora continua desatualizado: **desiste e avisa só o analista**, com notificação do Windows + e-mail para ele mesmo. Na linha do tempo aparece o botão **"Enviar mesmo assim"**.
 
-**O que conta como "atualizado"** **[escolha do Claude]**: o arquivo foi modificado **hoje** *e* **depois do último envio bem-sucedido desse mesmo envio**. Isso importa quando houver duas rodadas no dia (14h e 18h): o arquivo atualizado ao meio-dia não pode "passar" de novo às 18h sem ter sido atualizado outra vez. Com vários arquivos, **todos** precisam estar atualizados.
+**O que conta como "atualizado"** **[escolha técnica]**: o arquivo foi modificado **hoje** *e* **depois do último envio bem-sucedido desse mesmo envio**. Isso importa quando houver duas rodadas no dia (14h e 18h): o arquivo atualizado ao meio-dia não pode "passar" de novo às 18h sem ter sido atualizado outra vez. Com vários arquivos, **todos** precisam estar atualizados.
 
 ### 5.4 Falhas
 - Cada destinatário tem resultado próprio. Se o e-mail sai e o WhatsApp falha, o histórico mostra exatamente isso.
-- Falha de rede ou servidor: tenta de novo **3 vezes, a cada 5 minutos** **[escolha do Claude]**. Depois disso, avisa o analista do mesmo jeito que na regra 5.3.
+- Falha de rede ou servidor: tenta de novo **3 vezes, a cada 5 minutos** **[escolha técnica]**. Depois disso, avisa o analista do mesmo jeito que na regra 5.3.
 - **Nunca reenvia o que já saiu.** Um novo disparo manda só para quem falhou.
 - WhatsApp desconectado (sessão expirou): o envio fica "esperando conexão", o analista é avisado e a tela mostra o QR code para reconectar.
 
-### 5.5 Programa fechado ou PC desligado no horário **[escolha do Claude]**
+### 5.5 Programa fechado ou PC desligado no horário **[escolha técnica]**
 Ao abrir, o programa procura envios de **hoje** que deveriam ter saído e não saíram:
 - Se o horário passou **há menos de 2 horas**, executa agora, seguindo a regra 5.3.
 - Se passou mais do que isso, **não envia sozinho**: marca como "perdido" na linha do tempo e oferece "Enviar agora".
@@ -137,7 +137,7 @@ Ao abrir, o programa procura envios de **hoje** que deveriam ter saído e não s
 - Envio de teste "só para mim" disponível em todo cadastro.
 - A documentação deixa claro: é para uso interno, com pessoas que conhecem o número. Não serve para disparo em massa.
 
-### 5.7 Modo demonstração **[escolha do Claude]**
+### 5.7 Modo demonstração **[escolha técnica]**
 Uma chave na configuração faz o programa executar tudo (agendar, checar, montar mensagens, gravar histórico) **sem enviar de verdade**. Serve para apresentar o projeto, testar no PC pessoal e gravar vídeos para o portfólio sem perturbar ninguém.
 
 ## 6. Telas
@@ -158,7 +158,7 @@ Interface em **português**.
 |---|---|---|
 | Código, documentação, testes | pasta do projeto | Sim |
 | Dados fictícios de exemplo (espelham a base real) | `exemplos/` | Sim |
-| Cadastro de envios e contatos | pasta de dados do usuário, fora do código **[escolha do Claude]** | Não |
+| Cadastro de envios e contatos | pasta de dados do usuário, fora do código **[escolha técnica]** | Não |
 | Histórico de envios | pasta configurável (local hoje, rede compartilhada depois) | Não |
 | Sessão do WhatsApp | pasta de dados do usuário | Não |
 | Números de telefone e e-mails reais | só no cadastro local | Não (nem na documentação) |
@@ -168,7 +168,7 @@ Interface em **português**.
 O `.gitignore` também cobre `.superpowers/`, a pasta de rascunhos visuais.
 
 ### 7.1 Histórico de envios: o contrato com o futuro
-Um arquivo **CSV** por analista por mês, ex.: `historico/kayo/2026-10.csv` **[escolha do Claude]**. É CSV porque o chefe pode abrir no Excel, o Power BI lê direto e vários PCs podem gravar cada um no seu arquivo dentro de uma pasta de rede, sem banco de dados. Codificação UTF-8 com BOM, para o Excel abrir os acentos certos.
+Um arquivo **CSV** por analista por mês, ex.: `historico/kayo/2026-10.csv` **[escolha técnica]**. É CSV porque o chefe pode abrir no Excel, o Power BI lê direto e vários PCs podem gravar cada um no seu arquivo dentro de uma pasta de rede, sem banco de dados. Codificação UTF-8 com BOM, para o Excel abrir os acentos certos.
 
 Uma linha por **destinatário por tentativa**, com colunas:
 `data_hora, analista, envio, horario_agendado, canal, destinatario, arquivos, status, detalhe`
@@ -211,7 +211,7 @@ Em português, no repositório:
 | Número bloqueado | Seção 5.6. |
 | Excel com o arquivo aberto na hora do envio | Checagem antes de enviar (5.2); conta como "não pronto" e entra na espera da regra 5.3. |
 | TI bloqueia instalação do Python | Plano B portátil (seção 8). |
-| Empresa não sabia que há automação rodando no PC dela | **[escolha do Claude]** Apresentar ao gestor antes de ligar os envios reais; a documentação deste projeto é o material para essa conversa. |
+| Empresa não sabia que há automação rodando no PC dela | **[escolha técnica]** Apresentar ao gestor antes de ligar os envios reais; a documentação deste projeto é o material para essa conversa. |
 
 ### 10.1 WhatsApp: escolha da biblioteca (fica com o construtor, depois de um teste prático)
 Candidatas conhecidas: bibliotecas Python que falam o protocolo do WhatsApp sem navegador (ex.: as baseadas em *whatsmeow*), ou bibliotecas Node que controlam o WhatsApp Web (ex.: *whatsapp-web.js*). Critérios, nessa ordem:
@@ -234,7 +234,7 @@ Candidatas conhecidas: bibliotecas Python que falam o protocolo do WhatsApp sem 
 - Estrutura de pastas do código e formato do arquivo de cadastro.
 - Estilo visual, dentro de: claro, legível, em português, linha do tempo como tela principal.
 - Pausa exata entre mensagens de WhatsApp.
-- Nomes no código: **[escolha do Claude]** identificadores em inglês, comentários e documentação em português.
+- Nomes no código: **[escolha técnica]** identificadores em inglês, comentários e documentação em português.
 
 ## 13. Testes
 - Testes automáticos (pytest) para as regras que mais podem errar: "arquivo atualizado" (5.3, incluindo duas rodadas no dia), envio perdido (5.5), "nunca reenviar o que já saiu" (5.4), campos da mensagem e gravação do histórico.
