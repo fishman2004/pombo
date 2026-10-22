@@ -2,7 +2,7 @@ from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from pombo.models import Schedule
-from pombo.rules import check_slots, greeting, is_fresh, is_missed, next_retry_at, render, runs_for_day
+from pombo.rules import check_slots, greeting, is_fresh, is_missed, last_sales_day, next_retry_at, render, runs_for_day
 
 
 def test_runs_only_on_selected_weekdays():
@@ -54,3 +54,9 @@ def test_greeting_boundaries():
     assert greeting(datetime(2026, 10, 19, 11, 59)) == "Bom dia"
     assert greeting(datetime(2026, 10, 19, 12, 0)) == "Boa tarde"
     assert greeting(datetime(2026, 10, 19, 18, 0)) == "Boa noite"
+
+
+def test_last_sales_day_skips_sunday():
+    assert last_sales_day(date(2026, 10, 22)) == date(2026, 10, 21)
+    assert last_sales_day(date(2026, 10, 26)) == date(2026, 10, 24)  # segunda olha o sábado
+    assert render("{ontem} {valor}", datetime(2026, 10, 26, 9), [], {"valor": "S-LT"}) == "24/10/2026 S-LT"

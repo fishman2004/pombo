@@ -157,6 +157,28 @@ textarea { min-height: 96px; resize: vertical; }
 .avisos { border: 1px solid var(--espera); background: color-mix(in srgb, var(--espera) 10%, var(--cartao)); border-radius: var(--raio); padding: 10px 16px; }
 .sucesso { border: 1px solid var(--ok); background: color-mix(in srgb, var(--ok) 10%, var(--cartao)); border-radius: var(--raio); padding: 10px 16px; }
 
+/* ---------- print da planilha ---------- */
+details.print { border: 1px solid var(--linha); border-radius: var(--raio); background: var(--cartao); }
+details.print > summary { cursor: pointer; padding: 14px 16px; list-style-position: inside; }
+details.print[open] > summary { border-bottom: 1px solid var(--linha); }
+.print-corpo { display: grid; gap: 10px; padding: 14px 16px; }
+.print-corpo > button { justify-self: start; }
+.grade { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 14px; }
+
+/* a pré-visualização imita a conversa do WhatsApp: é assim que o grupo vai ver */
+.conversa {
+  display: grid; gap: 14px; padding: 18px; border-radius: var(--raio);
+  background: color-mix(in srgb, #0b141a 92%, var(--azul));
+}
+.balao {
+  margin: 0; max-width: 520px; padding: 4px 4px 10px; border-radius: 10px 10px 10px 2px;
+  background: #005c4b; color: #e9edef; box-shadow: 0 1px 1px rgb(0 0 0 / 30%);
+  animation: chega .35s ease both; animation-delay: calc(var(--i) * 90ms);
+}
+.balao img { display: block; width: 100%; border-radius: 8px; background: #fff; }
+.balao figcaption { white-space: pre-wrap; padding: 8px 8px 0; font-size: .93rem; line-height: 1.4; }
+@keyframes chega { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+
 /* ---------- listas e tabelas ---------- */
 .cartoes { display: grid; gap: 12px; }
 .cartao {
@@ -187,5 +209,5 @@ td.num { font-family: var(--fonte-numeros); white-space: nowrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
+  * { transition: none !important; animation: none !important; }
 }

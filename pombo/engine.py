@@ -16,6 +16,7 @@ from .channels import Channel, ChannelUnavailable, Target
 from .files import inspect
 from .history import SUCCESS, History, Row, run_label
 from .models import Dispatch, Registry
+from .snapshot import Part, SnapshotRuns
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -62,6 +63,13 @@ def targets_for(dispatch: Dispatch, reg: Registry) -> list[Target]:
     return out
 
 
+def split_targets(targets: list[Target], parts: list[Part]) -> list[Target]:
+    """Envio com print: cada destinatário recebe cada parte, e cada par tem a própria linha
+    no histórico. Se a rede cair na terceira parte, só a terceira em diante sai de novo."""
+    return [Target(t.channel, f"{t.label} · {p.label}" if p.label else t.label, t.addresses, f"{t.key}#{p.key}")
+            for t in targets for p in parts]
+
+
 def _matches(r: Row, t: Target) -> bool:
     if r.channel != t.channel:
         return False
@@ -89,8 +97,10 @@ class Engine:
         channels: dict[str, Channel],
         alerts: Alerts,
         clock: Callable[[], datetime] = datetime.now,
+        snapshots: SnapshotRuns | None = None,
     ) -> None:
         self.store = store
+        self.snapshots = snapshots or SnapshotRuns(store.path.parent / "recortes")
         self.history = history
         self.channels = channels
         self.alerts = alerts
@@ -148,7 +158,7 @@ class Engine:
     def _process(self, reg: Registry, d: Dispatch, scheduled: datetime, run: str, now: datetime,
                  force: bool, newer: list[Row] = (), retry_only: bool = False) -> None:
         rows = self.history.rows_for_run(d.id, run)
-        targets = targets_for(d, reg)
+        targets, parts = self._targets(reg, d, run)
         if not targets or all(_done(rows, t) for t in targets):
             return
         started = any(r.channel for r in rows)
@@ -162,6 +172,11 @@ class Engine:
                 return
             if not self._files_ready(reg, d, scheduled, run, now, rows):
                 return
+        if d.snapshot is not None and parts is None:
+            built = self._build(reg, d, run, now)
+            if built is None:
+                return
+            targets, parts = built
         for t in targets:
             if _done(rows, t) or any(_matches(r, t) for r in newer):
                 continue
@@ -169,7 +184,26 @@ class Engine:
             # rodada manual só repete o que falhou; rodada antiga não ganha destinatário novo
             if not force and not touched and (retry_only or rules.is_missed(scheduled, now)):
                 continue
-            self._send_one(reg, d, run, now, t, rows, force)
+            self._send_one(reg, d, run, now, t, rows, force, parts)
+
+    def _targets(self, reg: Registry, d: Dispatch, run: str) -> tuple[list[Target], dict[str, Part] | None]:
+        """Os destinatários da rodada. Com print, só depois de gerado é que se sabe quantas partes há."""
+        base = targets_for(d, reg)
+        parts = self.snapshots.load(d.id, run) if d.snapshot is not None else None
+        if parts is None:
+            return base, None
+        return split_targets(base, parts), {p.key: p for p in parts}
+
+    def _build(self, reg, d, run, now) -> tuple[list[Target], dict[str, Part]] | None:
+        try:
+            parts = self.snapshots.build(d, run, now)
+        except Exception as exc:
+            log.exception("erro ao montar o print de %s", d.name)
+            self._record(reg, d, run, now, None, "desistiu", f"print da planilha: {exc}")
+            self._alert_once(("print", d.id, run), f"Pombo: {d.name} não foi enviado",
+                             f"Não consegui montar o print da planilha: {exc}")
+            return None
+        return split_targets(targets_for(d, reg), parts), {p.key: p for p in parts}
 
     def _files_ready(self, reg, d, scheduled, run, now, rows) -> bool:
         key = (d.id, run)
@@ -181,7 +215,7 @@ class Engine:
 
         last = self.history.last_success(d.id)
         problem = ""
-        for f in d.files:
+        for f in d.watched_files:
             st = inspect(f)
             if not st.ready:
                 problem = f"{Path(f).name}: {st.reason}"
@@ -199,7 +233,7 @@ class Engine:
             self._record(reg, d, run, now, None, "esperando", f"{problem} (esperando até {slots[-1]:%H:%M})")
         return False
 
-    def _send_one(self, reg, d, run, now, t: Target, rows, force) -> None:
+    def _send_one(self, reg, d, run, now, t: Target, rows, force, parts: dict[str, Part] | None = None) -> None:
         failures = _failures(rows, t)
         down_key = (d.id, run, f"{t.channel}:{t.key or t.label}")
         if not force:
@@ -216,8 +250,8 @@ class Engine:
         try:
             if channel is None:
                 raise ChannelUnavailable(f"canal {t.channel} não configurado")
-            channel.send(t, rules.render(d.subject, now, d.files), rules.render(d.message, now, d.files),
-                         [Path(f) for f in d.files], use_bcc=d.use_bcc)
+            channel.send(t, *_content(d, now, parts.get(t.key.rpartition("#")[2]) if parts else None),
+                         use_bcc=d.use_bcc)
         except ChannelUnavailable as exc:
             if down_key not in self._unavailable_at:
                 self._record(reg, d, run, now, t, "esperando", str(exc))
@@ -235,7 +269,7 @@ class Engine:
         self._record(reg, d, run, now, t, "enviado", "")
 
     def _record(self, reg, d, run, now, target: Target | None, status, detail) -> None:
-        files = "; ".join(Path(f).name for f in d.files)
+        files = "; ".join(Path(f).name for f in d.watched_files)
         channel, label, key = (target.channel, target.label, target.key) if target else ("", "", "")
         self.history.append(Row(now, reg.settings.analyst_name, d.name, run, channel, label, files, status, detail, d.id, key))
 
@@ -273,6 +307,10 @@ class Engine:
         d = next(x for x in reg.dispatches if x.id == dispatch_id)
         s = reg.settings
         now = self.clock()
+        try:
+            parts = self.snapshots.preview(d, now) if d.snapshot is not None else [None]
+        except Exception as exc:
+            return [("print", str(exc) or type(exc).__name__)]
         targets = []
         if s.self_email:
             targets.append(Target("email", "Eu (teste)", (s.self_email,)))
@@ -281,12 +319,20 @@ class Engine:
         results = []
         for t in targets:
             try:
-                self.channels[t.channel].send(t, "[TESTE] " + rules.render(d.subject, now, d.files),
-                                              rules.render(d.message, now, d.files), [Path(f) for f in d.files])
+                for part in parts:
+                    subject, message, files = _content(d, now, part)
+                    self.channels[t.channel].send(t, "[TESTE] " + subject, message, files)
                 results.append((t.channel, "ok"))
             except Exception as exc:
                 results.append((t.channel, str(exc) or type(exc).__name__))
         return results
+
+    def preview(self, dispatch_id: str) -> list[Part]:
+        """Gera as imagens e textos do print sem enviar nada (botão "Pré-visualizar")."""
+        d = next(x for x in self.store.load().dispatches if x.id == dispatch_id)
+        if d.snapshot is None:
+            return []
+        return self.snapshots.preview(d, self.clock())
 
     def timeline(self, day: date) -> list[TimelineItem]:
         reg = self.store.load()
@@ -303,7 +349,7 @@ class Engine:
 
     def _item(self, reg, d, scheduled, run, now, manual) -> TimelineItem:
         rows = self.history.rows_for_run(d.id, run)
-        targets = targets_for(d, reg)
+        targets, _ = self._targets(reg, d, run)
         sent = sum(1 for t in targets if _done(rows, t))
         total = len(targets)
 
@@ -332,3 +378,10 @@ class Engine:
         if not rows and scheduled <= now and rules.is_missed(scheduled, now):
             return item("perdido", "programa fechado no horário")
         return item("agendado")
+
+
+def _content(d: Dispatch, now: datetime, part: Part | None) -> tuple[str, str, list[Path]]:
+    """Assunto, texto e anexos de um envio. Com print, cada parte leva a sua imagem e a sua legenda."""
+    if part is not None:
+        return part.subject, part.text, [part.image]
+    return rules.render(d.subject, now, d.files), rules.render(d.message, now, d.files), [Path(f) for f in d.files]

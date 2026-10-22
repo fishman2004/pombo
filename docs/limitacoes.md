@@ -32,6 +32,13 @@ Com a fase 2 (atualização automática), essa dependência diminui.
 - O limite de anexos é **20 MB por e-mail** (configurável). Servidores de e-mail costumam recusar mensagens maiores.
 - A senha fica no Gerenciador de Credenciais do Windows **do usuário**. Outro usuário do mesmo PC não a vê.
 
+## Print da planilha
+
+- O Pombo lê os **valores que o Excel salvou**. Fórmulas recalculadas e não salvas não aparecem: salve a planilha depois de atualizar.
+- O desenho da imagem é do Pombo (cores do PHD, cabeçalho azul-escuro), não uma cópia da formatação da planilha.
+- As colunas de dia usam o **dia do mês** da linha indicada (ou a data, se a linha tiver datas). Numa semana que vira o mês, aparecem só os dias que estão na planilha do mês de referência.
+- No e-mail, cada parte vai como uma mensagem com a imagem anexa.
+
 ## Outros
 
 - Uma pessoa por instalação. O painel da equipe é a [fase 4 do roadmap](roadmap.md).

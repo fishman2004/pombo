@@ -12,7 +12,9 @@
     <h3><a href="/envios/{{ d.id }}">{{ d.name }}</a>{% if not d.active %} <span class="etiqueta">pausado</span>{% endif %}</h3>
     <p>{% for w in range(7) %}{% if w in d.schedule.weekdays %}{{ WEEKDAYS[w] }} {% endif %}{% endfor %}
       · {% for t in d.schedule.times %}{{ t.strftime('%H:%M') }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
-    <p>{% for f in d.files %}{{ f.name }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+    <p>{% for f in d.files %}{{ f.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+      {%- if d.snapshot %}{% if d.files %} · {% endif %}print de {{ d.snapshot.source.name }}{% if d.snapshot.split_column %}, um por valor da coluna {{ d.snapshot.split_column }}{% endif %}
+      {%- elif not d.files %}só mensagem{% endif %}</p>
   </article>
   {% endfor %}
 </div>

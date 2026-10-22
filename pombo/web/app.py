@@ -20,7 +20,8 @@ from ..channels import Target
 from ..channels.email import EmailChannel
 from ..channels.whatsapp import normalize_phone
 from ..files import inspect
-from ..models import Contact, Dispatch, EmailList, Schedule, Settings
+from ..models import Contact, Dispatch, EmailList, Schedule, Settings, Snapshot
+from ..snapshot import FIELDS as SNAPSHOT_FIELDS, SnapshotError, col_index, parse_columns
 from ..store import Store, new_id
 from ..winsys import set_start_with_windows
 
@@ -76,6 +77,8 @@ def create_app(
     templates = Jinja2Templates(directory=HERE / "templates")
     templates.env.globals["state_label"] = state_label
     templates.env.globals["WEEKDAYS"] = WEEKDAYS
+    templates.env.globals["SNAPSHOT_FIELDS"] = SNAPSHOT_FIELDS
+    app.state.previews = {}  # id do envio -> partes da última pré-visualização
 
     def page(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLResponse:
         reg = store.load()
@@ -111,13 +114,17 @@ def create_app(
                     "whatsapp_contact_ids": [], "whatsapp_group_ids": [], "weekdays": {0, 1, 2, 3, 4},
                     "times": "18:00", "subject": "{arquivos}: {data}",
                     "message": "{saudacao}! Segue o relatório atualizado em {data}.",
-                    "use_bcc": True, "check_freshness": True, "active": True}
-        return {**d.model_dump(), "files": "\n".join(str(f) for f in d.files),
-                "times": ", ".join(t.strftime("%H:%M") for t in d.schedule.times), "weekdays": d.schedule.weekdays}
+                    "use_bcc": True, "check_freshness": True, "active": True, **snapshot_values(None)}
+        return {**d.model_dump(exclude={"snapshot"}), "files": "\n".join(str(f) for f in d.files),
+                "times": ", ".join(t.strftime("%H:%M") for t in d.schedule.times), "weekdays": d.schedule.weekdays,
+                **snapshot_values(d.snapshot)}
 
     def envio_form(request: Request, values: dict, status_code: int = 200, **ctx) -> HTMLResponse:
         reg = store.load()
-        statuses = [inspect(Path(p)) for p in values["files"].splitlines() if p.strip()]
+        paths = [p.strip().strip('"') for p in values["files"].splitlines() if p.strip().strip('"')]
+        if values.get("sn_on") and values.get("sn_source"):
+            paths.append(values["sn_source"])
+        statuses = [inspect(Path(p)) for p in paths]
         return page(request, "envio_form.html", status_code, active="envios", v=values, reg=reg,
                     file_statuses=statuses, **ctx)
 
@@ -148,14 +155,17 @@ def create_app(
             "weekdays": {int(x) for x in f.getlist("weekdays") if x.isdigit()},
             "times": f.get("times", ""), "subject": f.get("subject", ""), "message": f.get("message", ""),
             "use_bcc": "use_bcc" in f, "check_freshness": "check_freshness" in f, "active": "active" in f,
+            **{k: (f.get(k, "") if k not in SNAPSHOT_BOOLS else k in f) for k in snapshot_values(None)},
         }
         errors = []
         if not values["name"]:
             errors.append("Dê um nome ao envio.")
         # "Copiar como caminho" do Windows vem entre aspas
         files = [Path(p.strip().strip('"')) for p in values["files"].splitlines() if p.strip().strip('"')]
-        if not files:
-            errors.append("Informe pelo menos um arquivo.")
+        snapshot, snapshot_errors = parse_snapshot(values)
+        errors += snapshot_errors
+        if not files and not values["sn_on"] and not values["message"].strip():
+            errors.append("Sem arquivo, o envio manda só o texto: escreva a mensagem.")
         if not any(values[k] for k in ("email_list_ids", "email_contact_ids", "whatsapp_contact_ids", "whatsapp_group_ids")):
             errors.append("Escolha pelo menos um destinatário.")
         if not values["weekdays"]:
@@ -174,11 +184,12 @@ def create_app(
             whatsapp_contact_ids=values["whatsapp_contact_ids"], whatsapp_group_ids=values["whatsapp_group_ids"],
             schedule=Schedule(weekdays=values["weekdays"], times=times), subject=values["subject"],
             message=values["message"], use_bcc=values["use_bcc"], check_freshness=values["check_freshness"],
-            active=values["active"],
+            active=values["active"], snapshot=snapshot,
         )
         reg.dispatches = [x for x in reg.dispatches if x.id != d.id] + [d]
         store.save(reg)
-        warnings = [f"{s.path.name}: {s.reason}" for s in map(inspect, files) if not s.ready]
+        app.state.previews.pop(d.id, None)
+        warnings = [f"{s.path.name}: {s.reason}" for s in map(inspect, d.watched_files) if not s.ready]
         if warnings:
             # caminho de rede fora do ar agora não impede salvar; só avisa
             return envio_form(request, dispatch_values(d), saved=True, warnings=warnings)
@@ -197,6 +208,25 @@ def create_app(
         names = {"email": "e-mail", "whatsapp": "WhatsApp"}
         results = [f"{names.get(ch, ch)}: {res}" for ch, res in engine.send_test(dispatch_id)]
         return envio_form(request, dispatch_values(d), test_results=results or ["Configure seu e-mail ou WhatsApp em Configurações."])
+
+    @app.post("/envios/{dispatch_id}/previa", response_class=HTMLResponse)
+    def envio_previa(request: Request, dispatch_id: str):
+        d = next((x for x in store.load().dispatches if x.id == dispatch_id), None)
+        if d is None:
+            return RedirectResponse("/envios", status_code=303)
+        try:
+            parts = engine.preview(dispatch_id)
+        except Exception as exc:
+            return envio_form(request, dispatch_values(d), errors=[f"Não consegui montar o print: {exc}"])
+        app.state.previews[dispatch_id] = parts
+        return envio_form(request, dispatch_values(d), preview=parts)
+
+    @app.get("/envios/{dispatch_id}/previa/{index}.png")
+    def envio_previa_imagem(dispatch_id: str, index: int):
+        parts = app.state.previews.get(dispatch_id) or []
+        if not 0 <= index < len(parts) or not Path(parts[index].image).is_file():
+            return Response(status_code=404)
+        return Response(Path(parts[index].image).read_bytes(), media_type="image/png", headers={"Cache-Control": "no-store"})
 
     # ---------- Contatos, listas e grupos ----------
 
@@ -431,6 +461,94 @@ def create_app(
     app.state.page = page
     app.state.templates = templates
     return app
+
+
+SNAPSHOT_BOOLS = {"sn_on", "sn_hide_sundays"}
+
+
+def snapshot_values(sn: Snapshot | None) -> dict:
+    """Os campos do print na tela (prefixo sn_), sempre como texto."""
+    if sn is None:
+        return {"sn_on": False, "sn_source": "", "sn_sheet": "", "sn_header_row": "", "sn_columns": "",
+                "sn_day_columns": "", "sn_day_row": "", "sn_reference": "ontem", "sn_hide_sundays": True,
+                "sn_extra_columns": "", "sn_split_column": "", "sn_split_values": "", "sn_name_column": "",
+                "sn_metric_column": "", "sn_threshold": "5", "sn_worst_count": "5", "sn_title": ""}
+    return {"sn_on": True, "sn_source": str(sn.source), "sn_sheet": sn.sheet, "sn_header_row": str(sn.header_row),
+            "sn_columns": ", ".join(sn.columns), "sn_day_columns": sn.day_columns,
+            "sn_day_row": str(sn.day_row or ""), "sn_reference": sn.reference, "sn_hide_sundays": sn.hide_sundays,
+            "sn_extra_columns": ", ".join(sn.extra_columns), "sn_split_column": sn.split_column,
+            "sn_split_values": "\n".join(sn.split_values), "sn_name_column": sn.name_column,
+            "sn_metric_column": sn.metric_column, "sn_threshold": _num(sn.threshold),
+            "sn_worst_count": str(sn.worst_count), "sn_title": sn.title}
+
+
+def _num(n: float) -> str:
+    return str(int(n)) if n == int(n) else str(n).replace(".", ",")
+
+
+def parse_snapshot(v: dict) -> tuple[Snapshot | None, list[str]]:
+    if not v["sn_on"]:
+        return None, []
+    errors = []
+
+    def row(key: str, label: str, required: bool) -> int:
+        text = str(v[key]).strip()
+        if not text and not required:
+            return 0
+        if not text.isdigit() or int(text) < 1:
+            errors.append(f"{label}: informe o número da linha (ex.: 15).")
+            return 0
+        return int(text)
+
+    def letters(key: str, label: str) -> list[str]:
+        try:
+            return parse_columns(v[key])
+        except SnapshotError:
+            errors.append(f"{label}: use letras de coluna do Excel, como B, D:E, AK.")
+            return []
+
+    def letter(key: str, label: str) -> str:
+        text = str(v[key]).strip().upper()
+        if text:
+            try:
+                col_index(text)
+            except SnapshotError:
+                errors.append(f"{label}: use uma letra de coluna do Excel, como E.")
+        return text
+
+    source = str(v["sn_source"]).strip().strip('"')
+    if not source:
+        errors.append("Print da planilha: informe o caminho da planilha.")
+    header_row = row("sn_header_row", "Linha do cabeçalho", True)
+    columns = letters("sn_columns", "Colunas fixas")
+    day_columns = str(v["sn_day_columns"]).strip().upper()
+    if day_columns:
+        try:
+            parse_columns(day_columns)
+        except SnapshotError:
+            errors.append("Colunas dos dias: use um intervalo, como F:AJ.")
+    day_row = row("sn_day_row", "Linha com o dia do mês", bool(day_columns))
+    if not columns and not day_columns:
+        errors.append("Print da planilha: escolha pelo menos uma coluna.")
+    try:
+        threshold = float(str(v["sn_threshold"]).strip().replace(",", ".") or 0)
+    except ValueError:
+        errors.append("Meta por dia: informe um número.")
+        threshold = 0
+    worst = str(v["sn_worst_count"]).strip() or "0"
+    if not worst.isdigit() or int(worst) > 50:
+        errors.append("Quantos aparecem em {piores}: de 0 a 50.")
+        worst = "0"
+    snapshot = dict(
+        source=Path(source), sheet=str(v["sn_sheet"]).strip(), header_row=header_row or 1, columns=columns,
+        day_columns=day_columns, day_row=day_row, reference="hoje" if v["sn_reference"] == "hoje" else "ontem",
+        hide_sundays=bool(v["sn_hide_sundays"]), extra_columns=letters("sn_extra_columns", "Colunas no fim"),
+        split_column=letter("sn_split_column", "Um print por"),
+        split_values=[x.strip() for x in str(v["sn_split_values"]).splitlines() if x.strip()],
+        name_column=letter("sn_name_column", "Coluna do nome"), metric_column=letter("sn_metric_column", "Coluna da média"),
+        threshold=threshold, worst_count=int(worst), title=str(v["sn_title"]).strip(),
+    )
+    return (None, errors) if errors else (Snapshot(**snapshot), [])
 
 
 def parse_times(text: str) -> tuple[list[time], list[str]]:

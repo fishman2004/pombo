@@ -49,12 +49,20 @@ def greeting(now: datetime) -> str:
     return "Boa noite"
 
 
-def render(template: str, now: datetime, files: list[Path]) -> str:
+def last_sales_day(day: date) -> date:
+    """O dia de venda anterior: domingo não tem venda, então segunda olha o sábado."""
+    prev = day - timedelta(days=1)
+    return prev - timedelta(days=1) if prev.weekday() == 6 else prev
+
+
+def render(template: str, now: datetime, files: list[Path], extra: dict[str, str] | None = None) -> str:
     values = {
         "saudacao": greeting(now),
         "data": now.strftime("%d/%m/%Y"),
         "hora": now.strftime("%H:%M"),
+        "ontem": last_sales_day(now.date()).strftime("%d/%m/%Y"),
         "arquivos": ", ".join(Path(f).name for f in files),
+        **(extra or {}),
     }
     # campo desconhecido ou chave solta fica como está, sem erro
     return re.sub(r"\{(\w+)\}", lambda m: values.get(m[1], m[0]), template)

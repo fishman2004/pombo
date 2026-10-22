@@ -30,10 +30,34 @@ class Schedule(BaseModel):
     times: list[time]
 
 
+class Snapshot(BaseModel):
+    """Print de um pedaço da planilha + texto calculado, um por valor da coluna de divisão.
+
+    Colunas são letras do Excel ("B", "AJ") e linhas são números, como o analista vê na planilha.
+    """
+
+    source: Path
+    sheet: str = ""  # vazio = primeira aba
+    header_row: int  # linha com os nomes das colunas
+    columns: list[str]  # colunas fixas, na ordem em que aparecem no print
+    day_columns: str = ""  # intervalo das colunas de dia ("F:AJ"); vazio = sem colunas de dia
+    day_row: int = 0  # linha com o dia do mês (1..31) ou a data de cada coluna de dia
+    reference: Literal["hoje", "ontem"] = "ontem"  # "ontem" = último dia de venda (segunda olha o sábado)
+    hide_sundays: bool = True
+    extra_columns: list[str] = Field(default_factory=list)  # depois dos dias (ex.: média)
+    split_column: str = ""  # um print por valor desta coluna (ex.: supervisor); vazio = um print só
+    split_values: list[str] = Field(default_factory=list)  # vazio = todos os valores, na ordem da planilha
+    name_column: str = ""  # nome que aparece em {piores} e {melhores}
+    metric_column: str = ""  # vazio = média dos dias mostrados até a data de referência
+    threshold: float = 5  # pinta os dias e conta {acima}/{abaixo}
+    worst_count: int = 5
+    title: str = ""  # faixa no topo da imagem; aceita os mesmos campos da mensagem
+
+
 class Dispatch(BaseModel):
     id: str
     name: str
-    files: list[Path]
+    files: list[Path] = Field(default_factory=list)  # vazio = só texto (ou só o print)
     email_list_ids: list[str] = Field(default_factory=list)
     email_contact_ids: list[str] = Field(default_factory=list)
     whatsapp_contact_ids: list[str] = Field(default_factory=list)
@@ -44,6 +68,12 @@ class Dispatch(BaseModel):
     use_bcc: bool = True
     check_freshness: bool = True
     active: bool = True
+    snapshot: Snapshot | None = None
+
+    @property
+    def watched_files(self) -> list[Path]:
+        """Arquivos que precisam estar prontos (e atualizados) antes de enviar."""
+        return list(self.files) + ([self.snapshot.source] if self.snapshot else [])
 
 
 class Settings(BaseModel):

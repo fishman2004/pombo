@@ -32,6 +32,16 @@ class FakeClient:
             raise RuntimeError("timeout")
         self.sent.append((to, filename, caption))
 
+    def send_image(self, to, data, caption):
+        if self.fail:
+            raise RuntimeError("timeout")
+        self.sent.append((to, "imagem", caption))
+
+    def send_text(self, to, text):
+        if self.fail:
+            raise RuntimeError("timeout")
+        self.sent.append((to, "texto", text))
+
 
 def make(tmp_path, client):
     sleeps = []
@@ -70,6 +80,28 @@ def test_caption_only_on_first_and_pause_between(tmp_path):
     ch.send(Target("whatsapp", "Comercial", ("123@g.us",)), "", "Boa noite!", docs(tmp_path, "a.xlsx", "b.xlsx"))
     assert client.sent == [("123@g.us", "a.xlsx", "Boa noite!"), ("123@g.us", "b.xlsx", None)]
     assert sleeps == [3, 3]
+
+
+def test_png_goes_as_photo_with_caption(tmp_path):
+    client = FakeClient()
+    ch, sleeps = make(tmp_path, client)
+    ch.send(Target("whatsapp", "Comercial", ("123@g.us",)), "", "Resultado do dia", docs(tmp_path, "print.png", "a.xlsx"))
+    assert client.sent == [("123@g.us", "imagem", "Resultado do dia"), ("123@g.us", "a.xlsx", None)]
+    assert sleeps == [3, 3]
+
+
+def test_no_files_sends_text_message(tmp_path):
+    client = FakeClient()
+    ch, sleeps = make(tmp_path, client)
+    ch.send(Target("whatsapp", "Comercial", ("123@g.us",)), "", "Lembrete: PHD até 9h", [])
+    assert client.sent == [("123@g.us", "texto", "Lembrete: PHD até 9h")]
+    assert sleeps == [3]
+
+
+def test_text_error_becomes_send_error(tmp_path):
+    ch, _ = make(tmp_path, FakeClient(fail=True))
+    with pytest.raises(SendError):
+        ch.send(Target("whatsapp", "Comercial", ("123@g.us",)), "", "oi", [])
 
 
 def test_phone_target_becomes_user_jid(tmp_path):
