@@ -18,6 +18,7 @@ from . import ChannelUnavailable, SendError, Target
 PAUSE_SECONDS = 3  # pausa entre mensagens, para não parecer disparo em massa
 QR_VALID_SECONDS = 60  # o WhatsApp para de gerar códigos novos depois de ~2 min; um código parado vence
 STARTING_SECONDS = 30  # tempo para o primeiro QR code aparecer depois de (re)conectar
+IMAGE_EXTS = {".png", ".jpg", ".jpeg"}  # vão como foto (aparecem na conversa), não como documento
 
 
 def normalize_phone(raw: str) -> str:
@@ -59,14 +60,20 @@ class _NeonizeClient:
 
         return [(Jid2String(g.JID), g.GroupName.Name) for g in self._client.get_joined_groups()]
 
-    def send_document(self, to: str, data: bytes, filename: str, caption: str | None, mimetype: str) -> None:
+    def _jid(self, to: str):
         from neonize.utils.jid import build_jid
 
         user, server = to.split("@", 1)
-        jid = build_jid(user, server)
-        if server == "s.whatsapp.net":
-            jid = self._resolve(user)
-        self._client.send_document(jid, data, caption=caption, filename=filename, mimetype=mimetype)
+        return self._resolve(user) if server == "s.whatsapp.net" else build_jid(user, server)
+
+    def send_document(self, to: str, data: bytes, filename: str, caption: str | None, mimetype: str) -> None:
+        self._client.send_document(self._jid(to), data, caption=caption, filename=filename, mimetype=mimetype)
+
+    def send_image(self, to: str, data: bytes, caption: str | None) -> None:
+        self._client.send_image(self._jid(to), data, caption=caption)
+
+    def send_text(self, to: str, text: str) -> None:
+        self._client.send_message(self._jid(to), text)
 
     def _resolve(self, number: str):
         """Pergunta ao WhatsApp o endereço real. Resolve o nono dígito sozinho."""
@@ -198,11 +205,21 @@ class WhatsAppChannel:
             raise ChannelUnavailable("WhatsApp desconectado")
         to = _jid_text(target.addresses[0])
         with self._lock:
-            for i, f in enumerate(files):
-                path = Path(f)
-                mimetype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-                try:
-                    self._client.send_document(to, path.read_bytes(), path.name, message if i == 0 else None, mimetype)
-                except Exception as exc:  # a biblioteca lança tipos variados; todos viram falha de envio
-                    raise SendError(f"{type(exc).__name__}: {exc}") from exc
-                self._sleep(PAUSE_SECONDS)
+            try:
+                if not files:
+                    # mensagem programada só com texto
+                    if message.strip():
+                        self._client.send_text(to, message)
+                        self._sleep(PAUSE_SECONDS)
+                    return
+                for i, f in enumerate(files):
+                    path = Path(f)
+                    caption = message if i == 0 else None
+                    if path.suffix.lower() in IMAGE_EXTS:
+                        self._client.send_image(to, path.read_bytes(), caption)
+                    else:
+                        mimetype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                        self._client.send_document(to, path.read_bytes(), path.name, caption, mimetype)
+                    self._sleep(PAUSE_SECONDS)
+            except Exception as exc:  # a biblioteca lança tipos variados; todos viram falha de envio
+                raise SendError(f"{type(exc).__name__}: {exc}") from exc

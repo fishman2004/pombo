@@ -21,7 +21,8 @@
   <div>
     <label for="files">Arquivos</label>
     <textarea id="files" name="files" placeholder="S:\Relatórios definitivos\Vendas.xlsx">{{ v.files }}</textarea>
-    <p class="ajuda">Um caminho por linha. Dica: no Explorador, segure Shift, clique com o botão direito no arquivo e escolha "Copiar como caminho".</p>
+    <p class="ajuda">Um caminho por linha. Dica: no Explorador, segure Shift, clique com o botão direito no arquivo e escolha "Copiar como caminho".
+      Sem arquivo, o Pombo manda só a mensagem (lembretes, avisos) ou só o print da planilha.</p>
     {% if file_statuses %}<ul class="ajuda">{% for s in file_statuses %}<li>{{ s.path.name }}: {{ 'pronto' if s.ready else s.reason }}{% if s.mtime %} · modificado {{ s.mtime.strftime('%d/%m %H:%M') }}{% endif %}</li>{% endfor %}</ul>{% endif %}
   </div>
 
@@ -53,13 +54,70 @@
     <p class="ajuda">Separe vários horários por vírgula.</p>
   </fieldset>
 
+  <details class="print" {% if v.sn_on %}open{% endif %}>
+    <summary><strong>Print da planilha com texto calculado</strong> <span class="ajuda">opcional · o PHD e parecidos, sem filtrar e ocultar à mão</span></summary>
+    <div class="print-corpo">
+      <label style="font-weight:400"><input type="checkbox" name="sn_on" id="sn_on" {% if v.sn_on %}checked{% endif %}> Gerar o print da planilha e enviar como foto, com a mensagem abaixo como legenda</label>
+      <button type="button" class="discreto" id="modelo-phd">Preencher com o modelo do PHD</button>
+
+      <label for="sn_source">Planilha</label>
+      <input type="text" id="sn_source" name="sn_source" value="{{ v.sn_source }}" placeholder="S:\Relatórios\PHD.xlsx">
+      <p class="ajuda">O Pombo lê os valores que o Excel salvou por último. Salve a planilha depois de atualizar.</p>
+
+      <div class="grade">
+        <div><label for="sn_sheet">Aba</label>
+          <input type="text" id="sn_sheet" name="sn_sheet" value="{{ v.sn_sheet }}" placeholder="vazio = primeira"></div>
+        <div><label for="sn_header_row">Linha do cabeçalho</label>
+          <input type="text" id="sn_header_row" name="sn_header_row" value="{{ v.sn_header_row }}" placeholder="15" inputmode="numeric"></div>
+        <div><label for="sn_columns">Colunas fixas</label>
+          <input type="text" id="sn_columns" name="sn_columns" value="{{ v.sn_columns }}" placeholder="B:E"></div>
+        <div><label for="sn_extra_columns">Colunas no fim</label>
+          <input type="text" id="sn_extra_columns" name="sn_extra_columns" value="{{ v.sn_extra_columns }}" placeholder="AK (opcional)"></div>
+      </div>
+
+      <div class="grade">
+        <div><label for="sn_day_columns">Colunas dos dias</label>
+          <input type="text" id="sn_day_columns" name="sn_day_columns" value="{{ v.sn_day_columns }}" placeholder="F:AJ"></div>
+        <div><label for="sn_day_row">Linha com o dia do mês</label>
+          <input type="text" id="sn_day_row" name="sn_day_row" value="{{ v.sn_day_row }}" placeholder="14" inputmode="numeric"></div>
+        <div><label for="sn_reference">Resultado de</label>
+          <select id="sn_reference" name="sn_reference">
+            <option value="ontem" {% if v.sn_reference == 'ontem' %}selected{% endif %}>ontem (segunda olha o sábado)</option>
+            <option value="hoje" {% if v.sn_reference == 'hoje' %}selected{% endif %}>hoje</option>
+          </select></div>
+        <div><label for="sn_threshold">Meta por dia</label>
+          <input type="text" id="sn_threshold" name="sn_threshold" value="{{ v.sn_threshold }}" placeholder="5" inputmode="decimal"></div>
+      </div>
+      <p class="ajuda">Aparecem só os dias da semana do resultado, até hoje. Dia na meta fica verde, abaixo fica laranja, zero fica rosa.</p>
+      <label style="font-weight:400"><input type="checkbox" name="sn_hide_sundays" {% if v.sn_hide_sundays %}checked{% endif %}> Esconder domingos</label>
+
+      <div class="grade">
+        <div><label for="sn_split_column">Um print por</label>
+          <input type="text" id="sn_split_column" name="sn_split_column" value="{{ v.sn_split_column }}" placeholder="E (supervisor)"></div>
+        <div><label for="sn_name_column">Coluna do nome</label>
+          <input type="text" id="sn_name_column" name="sn_name_column" value="{{ v.sn_name_column }}" placeholder="D"></div>
+        <div><label for="sn_metric_column">Coluna da média</label>
+          <input type="text" id="sn_metric_column" name="sn_metric_column" value="{{ v.sn_metric_column }}" placeholder="vazio = média dos dias"></div>
+        <div><label for="sn_worst_count">Quantos em {piores}</label>
+          <input type="text" id="sn_worst_count" name="sn_worst_count" value="{{ v.sn_worst_count }}" placeholder="5" inputmode="numeric"></div>
+      </div>
+      <label for="sn_split_values">Só estes valores <span class="ajuda">(um por linha, na ordem de envio; vazio = todos)</span></label>
+      <textarea id="sn_split_values" name="sn_split_values" style="min-height:64px">{{ v.sn_split_values }}</textarea>
+      <label for="sn_title">Título no topo da imagem <span class="ajuda">(opcional)</span></label>
+      <input type="text" id="sn_title" name="sn_title" value="{{ v.sn_title }}" placeholder="PHD · {valor} · {referencia}">
+    </div>
+  </details>
+
   <fieldset>
     <legend>Mensagem</legend>
     <label for="subject">Assunto do e-mail</label>
     <input type="text" id="subject" name="subject" value="{{ v.subject }}">
     <label for="message" style="margin-top:12px">Texto (e-mail e legenda do WhatsApp)</label>
     <textarea id="message" name="message">{{ v.message }}</textarea>
-    <p class="ajuda">Campos automáticos: <code>{saudacao}</code> (Bom dia/Boa tarde/Boa noite), <code>{data}</code>, <code>{hora}</code>, <code>{arquivos}</code>.</p>
+    <p class="ajuda">Campos automáticos: <code>{saudacao}</code> (Bom dia/Boa tarde/Boa noite), <code>{data}</code>, <code>{hora}</code>, <code>{ontem}</code>, <code>{arquivos}</code>.</p>
+    <p class="ajuda campos-print">Com o print: {% for f in SNAPSHOT_FIELDS %}<code>{{ '{' ~ f ~ '}' }}</code>{% if not loop.last %} {% endif %}{% endfor %}.
+      <code>{valor}</code> é o supervisor (ou o valor de "Um print por"), <code>{acima}</code>/<code>{abaixo}</code> contam quem ficou na meta pela média,
+      <code>{piores}</code> lista os de média mais baixa.</p>
   </fieldset>
 
   <fieldset>
@@ -74,11 +132,43 @@
   </div>
 </form>
 
+{% if preview %}
+<section class="previa" aria-labelledby="h-previa">
+  <h2 id="h-previa">Pré-visualização · {{ preview|length }} {{ 'mensagem' if preview|length == 1 else 'mensagens' }} por destinatário</h2>
+  <div class="conversa">
+    {% for p in preview %}
+    <figure class="balao" style="--i: {{ loop.index0 }}">
+      <a href="/envios/{{ v.id }}/previa/{{ loop.index0 }}.png" target="_blank"><img src="/envios/{{ v.id }}/previa/{{ loop.index0 }}.png" alt="Print de {{ p.label }}"></a>
+      <figcaption>{{ p.text }}</figcaption>
+    </figure>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 {% if v.id %}
 <div class="acoes" style="margin-top:18px">
+  {% if v.sn_on %}<form method="post" action="/envios/{{ v.id }}/previa"><button class="discreto">Pré-visualizar o print</button></form>{% endif %}
   <form method="post" action="/envios/{{ v.id }}/testar"><button class="discreto">Enviar teste só para mim</button></form>
   <form method="post" action="/envios/{{ v.id }}/enviar-agora" onsubmit="return confirm('Enviar agora para todos os destinatários?')"><button class="discreto">Enviar agora para todos</button></form>
   <form method="post" action="/envios/{{ v.id }}/excluir" onsubmit="return confirm('Excluir este envio?')"><button class="perigo">Excluir</button></form>
 </div>
 {% endif %}
+
+<script>
+// modelo do PHD: o desenho da planilha (colunas e linhas) e o texto que vai no grupo
+document.getElementById("modelo-phd").addEventListener("click", () => {
+  const set = (id, value) => { const el = document.getElementById(id); if (el && !el.value) el.value = value; };
+  document.getElementById("sn_on").checked = true;
+  set("sn_header_row", "15"); set("sn_columns", "B:E"); set("sn_day_columns", "F:AJ"); set("sn_day_row", "14");
+  set("sn_split_column", "E"); set("sn_name_column", "D"); set("sn_threshold", "5"); set("sn_worst_count", "5");
+  document.getElementById("sn_reference").value = "ontem";
+  const msg = document.getElementById("message");
+  msg.value = "Resultado do dia:\n{referencia}\n\n{valor}\n{linhas}     Vendedores\n\n"
+    + "{acima}     Vendedores fizeram {limite} ou mais positivações\n{abaixo}     Vendedores com menos de {limite} positivações\n\n"
+    + "Atenção aos vendedores;\n{piores}\nSão os {qtd_piores} vendedores que na média mais afetam no resultado PHD, até o momento dessa parcial";
+  document.getElementById("subject").value = "PHD {valor}: {referencia}";
+  document.getElementById("sn_source").focus();
+});
+</script>
 {% endblock %}

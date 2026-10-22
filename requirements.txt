@@ -6,3 +6,4 @@ keyring==25.7.0
 win11toast==0.36.3
 neonize==0.5.2
 openpyxl==3.1.5
+pillow==12.3.0

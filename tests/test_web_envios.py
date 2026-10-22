@@ -59,9 +59,9 @@ def test_edit_keeps_id_and_unchecked_boxes_turn_off(tmp_path):
 
 def test_validation_messages(tmp_path):
     c, store, _ = setup(tmp_path)
-    r = c.post("/envios", data=form(tmp_path, name="", times="25:00", files="", weekdays=[], email_list_ids=[], whatsapp_group_ids=[]))
+    r = c.post("/envios", data=form(tmp_path, name="", times="25:00", files="", message="", weekdays=[], email_list_ids=[], whatsapp_group_ids=[]))
     assert r.status_code == 422
-    for msg in ["Dê um nome ao envio", "Informe pelo menos um arquivo", "Escolha pelo menos um destinatário",
+    for msg in ["Dê um nome ao envio", "Sem arquivo, o envio manda só o texto", "Escolha pelo menos um destinatário",
                 "Escolha pelo menos um dia", "Horário inválido: 25:00"]:
         assert msg in r.text
     assert store.load().dispatches == []
@@ -103,3 +103,76 @@ def test_new_form_lists_options(tmp_path):
     c, _, _ = setup(tmp_path)
     html = c.get("/envios/novo").text
     assert "Gestão" in html and "Comercial" in html and "Ana" in html and "{saudacao}" in html
+
+
+def snapshot_form(tmp_path, **overrides):
+    planilha = tmp_path / "PHD.xlsx"
+    planilha.write_bytes(b"x")
+    data = form(tmp_path, files="", sn_on="on", sn_source=f'"{planilha}"', sn_header_row="15", sn_columns="b:e",
+                sn_day_columns="f:aj", sn_day_row="14", sn_reference="ontem", sn_hide_sundays="on",
+                sn_split_column="e", sn_name_column="D", sn_threshold="4,5", sn_worst_count="5",
+                sn_split_values="S-LT (MARINA COUTO)\n\nS-ST (LUANA PRADO)\n", message="{valor}: {piores}")
+    data.update(overrides)
+    return data
+
+
+def test_create_dispatch_with_print(tmp_path):
+    c, store, _ = setup(tmp_path)
+    r = c.post("/envios", data=snapshot_form(tmp_path), follow_redirects=False)
+    assert r.status_code == 303
+    [d] = store.load().dispatches
+    sn = d.snapshot
+    assert d.files == [] and d.watched_files == [tmp_path / "PHD.xlsx"]
+    assert (sn.header_row, sn.columns, sn.day_columns, sn.day_row) == (15, ["B", "C", "D", "E"], "F:AJ", 14)
+    assert (sn.split_column, sn.name_column, sn.threshold, sn.worst_count) == ("E", "D", 4.5, 5)
+    assert sn.split_values == ["S-LT (MARINA COUTO)", "S-ST (LUANA PRADO)"] and sn.hide_sundays
+    page = c.get(f"/envios/{d.id}").text
+    assert 'value="4,5"' in page and "Pré-visualizar o print" in page
+    assert "print de PHD.xlsx" in c.get("/envios").text
+
+
+def test_print_validation(tmp_path):
+    c, store, _ = setup(tmp_path)
+    r = c.post("/envios", data=snapshot_form(tmp_path, sn_source="", sn_header_row="quinze", sn_columns="B, 12",
+                                             sn_day_row="", sn_split_column="E5", sn_threshold="muito"))
+    assert r.status_code == 422
+    for msg in ["informe o caminho da planilha", "Linha do cabeçalho", "Colunas fixas", "Linha com o dia do mês",
+                "Um print por", "Meta por dia"]:
+        assert msg in r.text
+    assert store.load().dispatches == []
+
+
+def test_turning_print_off_keeps_a_plain_dispatch(tmp_path):
+    c, store, _ = setup(tmp_path)
+    data = snapshot_form(tmp_path)
+    del data["sn_on"]
+    data["files"] = str(tmp_path / "PHD.xlsx")
+    c.post("/envios", data=data)
+    assert store.load().dispatches[0].snapshot is None
+
+
+def test_preview_shows_each_part(tmp_path):
+    from pombo.snapshot import Part
+
+    c, store, engine = setup(tmp_path)
+    c.post("/envios", data=snapshot_form(tmp_path))
+    d = store.load().dispatches[0]
+    img = tmp_path / "01.png"
+    img.write_bytes(b"\x89PNG-fake")
+    engine.preview_parts = [Part("s-lt", "S-LT", "PHD S-LT", "S-LT: 🔻 Ana", img)]
+    r = c.post(f"/envios/{d.id}/previa")
+    assert r.status_code == 200 and "S-LT: 🔻 Ana" in r.text and f"/envios/{d.id}/previa/0.png" in r.text
+    assert c.get(f"/envios/{d.id}/previa/0.png").content == b"\x89PNG-fake"
+    assert c.get(f"/envios/{d.id}/previa/1.png").status_code == 404
+
+
+def test_preview_error_is_shown(tmp_path):
+    c, store, engine = setup(tmp_path)
+    c.post("/envios", data=snapshot_form(tmp_path))
+    d = store.load().dispatches[0]
+
+    def broken(_):
+        raise RuntimeError("aba \"PHD\" não existe")
+    engine.preview = broken
+    r = c.post(f"/envios/{d.id}/previa")
+    assert "Não consegui montar o print" in r.text

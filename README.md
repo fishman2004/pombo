@@ -25,6 +25,8 @@ São **~10 minutos por rodada**, todo dia. Às vezes **alguém fica de fora**. E
 Você cadastra uma vez **o quê** (arquivos), **para quem** (listas de e-mail, contatos e grupos de WhatsApp), **quando** (dias e horários) e **com qual mensagem**. O Pombo cuida do resto:
 
 - **Envia no horário**, por e-mail e WhatsApp, com `{saudacao}`, `{data}` e `{arquivos}` preenchidos sozinhos.
+- **Print da planilha com texto calculado**: lê o Excel, separa por supervisor (ou qualquer coluna), desenha a tabela da semana e escreve o texto ("5 vendedores fizeram 5 ou mais", "🔻 os que mais afetam a média"). Um print com legenda por supervisor, sem filtrar e ocultar à mão. [Como usar](docs/mensagens-com-print.md).
+- **Mensagens só de texto** no horário: lembretes e avisos para grupos, sem arquivo.
 - **Nunca manda número velho sem avisar.** Se o arquivo não foi atualizado hoje, ele espera (confere a cada 15 min por até 1 h), depois desiste e **avisa você**, com um botão "Enviar mesmo assim".
 - **Nunca reenvia.** O estado vem do histórico; reiniciar o PC no meio de uma rodada não duplica nada.
 - **Tenta de novo** quando a rede falha (3 vezes, a cada 5 min) e avisa se não conseguir.
@@ -86,6 +88,7 @@ Cria uma pasta separada com envios, contatos e histórico **fictícios**, em mod
 
 | Documento | Para quem |
 |---|---|
+| [Mensagens com print](docs/mensagens-com-print.md) | Analistas: o PHD e parecidos no automático |
 | [Ganho de tempo](docs/ganho-de-tempo.md) | Gestão: quanto o Pombo economiza, com a conta |
 | [WhatsApp hoje e com investimento](docs/whatsapp-hoje-e-com-investimento.md) | Gestão e TI: automação atual × API oficial da Meta |
 | [Arquitetura](docs/arquitetura.md) | Quem vai manter o código |
@@ -101,7 +104,7 @@ Cria uma pasta separada com envios, contatos e histórico **fictícios**, em mod
 .venv\Scripts\python -m pytest
 ```
 
-Python 3.12 ou 3.13 · FastAPI · Jinja2 · neonize (WhatsApp) · smtplib · keyring · pytest.
+Python 3.12 ou 3.13 · FastAPI · Jinja2 · neonize (WhatsApp) · smtplib · keyring · openpyxl · Pillow · pytest.
 Mais de 100 testes automáticos cobrem as regras que mais podem errar: horários, arquivo atualizado, novas tentativas, envio perdido e "nunca reenviar".
 O desenho completo está em [docs/superpowers/specs](docs/superpowers/specs) e o plano de construção em [docs/superpowers/plans](docs/superpowers/plans).
 

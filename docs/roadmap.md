@@ -12,6 +12,23 @@ flowchart LR
 
 Este projeto. Arquivos, destinatários, horários, checagem de atualização, histórico.
 
+## Mensagens programadas ✅ (primeira parte)
+
+Pronto: print da planilha separado por supervisor, texto calculado, mensagens só de texto,
+pré-visualização e teste. Ver [mensagens-com-print.md](mensagens-com-print.md).
+
+Próximos passos, do mais útil para o menos:
+
+1. **Modelos prontos por rotina**: além do PHD, "positivações por pasta às 15h e 17h" e
+   "comparativo de rotas" como botões de preencher, para cada analista começar em segundos.
+2. **Regras de cor por coluna** (hoje a cor vale só nos dias): ex. média abaixo da meta em vermelho.
+3. **Condição para enviar**: só manda se `{abaixo}` > 0, ou só para supervisores com alguém abaixo.
+4. **Menções** no grupo (`@supervisor`) usando o contato cadastrado.
+5. **E-mail com a imagem no corpo** (hoje vai como anexo) e um e-mail só com todas as partes.
+6. **"Modo Excel"**: copiar o intervalo como imagem pelo próprio Excel, para planilhas com
+   formatação que o desenho do Pombo não reproduz.
+7. **Agendamento por data** (dia 10 do mês, último dia útil) além de dias da semana.
+
 ## Fase 2: Atualização automática dos Excels
 
 Hoje os relatórios usam planilhas com consultas ligadas aos dados extraídos do ERP (Winthor, rotina 8081) e do BI (TARGIT). Antes de enviar, o Pombo poderia:

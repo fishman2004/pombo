@@ -10,12 +10,18 @@ class FakeEngine:
         self.items_by_day = items_by_day or {}
         self.sent_now = []
         self.tested = []
+        self.previewed = []
+        self.preview_parts = []
 
     def timeline(self, day):
         return self.items_by_day.get(day, [])
 
     def send_now(self, dispatch_id, scheduled=None):
         self.sent_now.append((dispatch_id, scheduled))
+
+    def preview(self, dispatch_id):
+        self.previewed.append(dispatch_id)
+        return self.preview_parts
 
     def send_test(self, dispatch_id):
         self.tested.append(dispatch_id)
